@@ -112,7 +112,7 @@
   </div>
 
   <!-- 수급 동향 -->
-  <div class="section-label">전일 수급 동향 (코스피)</div>
+  <div class="section-label">전일 수급 동향 (코스피) <span id="supply-date" style="font-weight:400; color:#c7c7cc;"></span></div>
   <div class="card-full">
     <div class="card-label-row" style="margin-bottom:8px;">
       <span class="card-label">외국인 / 기관 / 개인 순매수</span>
@@ -298,6 +298,16 @@
     // KRX 실시간 API는 CORS 제한으로 직접 호출 불가
     // 실제 배포 시 서버리스 함수 또는 KRX Open API 키 필요
     // 아래는 샘플 데이터
+
+   const d = new Date();
+d.setDate(d.getDate() - 1);
+const days = ['일','월','화','수','목','금','토'];
+const dateStr = (d.getFullYear()+'').slice(2) + '.' +
+  String(d.getMonth()+1).padStart(2,'0') + '.' +
+  String(d.getDate()).padStart(2,'0') + '(' + days[d.getDay()] + ') 기준';
+const sdEl = document.getElementById('supply-date');
+if (sdEl) sdEl.textContent = dateStr;
+   
     const data = { foreign: -3241, institution: 1872, individual: 1540 };
     ['foreign', 'institution', 'individual'].forEach(key => {
       const el = document.getElementById(key);
