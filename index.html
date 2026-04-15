@@ -68,7 +68,7 @@
       <div class="header-title">moneylive</div>
       <div class="header-sub" id="datetime">로딩 중...</div>
     </div>
-    <button class="toggle-btn" onclick="toggleMode()">🌙 다크</button>
+    <button class="toggle-btn" onclick="toggleMode()">🌙</button>
   </div>
 
   <!-- 미국 시장 -->
@@ -233,7 +233,7 @@
     const isDark = app.classList.contains('dark');
     app.className = isDark ? 'app light' : 'app dark';
     body.className = isDark ? 'light' : 'dark';
-    btn.textContent = isDark ? '🌙 다크' : '☀️ 라이트';
+    btn.textContent = isDark ? '🌙' : '☀️';
   }
 
   function setVal(id, value, change) {
