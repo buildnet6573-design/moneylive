@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>moneylive 대시보드</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { display: flex; justify-content: center; padding: 20px; min-height: 100vh; }
+  body.light { background: #e5e5ea; }
+  body.dark { background: #111111; }
+  .app { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 390px; width: 100%; border-radius: 20px; overflow: hidden; border: 0.5px solid rgba(0,0,0,0.1); }
+  .app.light { background: #f2f2f7; color: #1c1c1e; }
+  .app.dark { background: #1c1c1e; color: #f2f2f7; border-color: rgba(255,255,255,0.1); }
+  .header { padding: 20px 20px 12px; display: flex; justify-content: space-between; align-items: center; }
+  .header-title { font-size: 22px; font-weight: 500; }
+  .header-sub { font-size: 12px; margin-top: 2px; color: #8e8e93; }
+  .toggle-btn { border: none; cursor: pointer; border-radius: 20px; padding: 6px 14px; font-size: 13px; font-weight: 500; }
+  .light .toggle-btn { background: #e5e5ea; color: #1c1c1e; }
+  .dark .toggle-btn { background: #2c2c2e; color: #f2f2f7; }
+  .section-label { font-size: 12px; font-weight: 500; padding: 0 20px 8px; letter-spacing: 0.3px; color: #8e8e93; }
+  .cards { padding: 0 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .card { border-radius: 16px; padding: 14px 14px; position: relative; }
+  .light .card { background: #ffffff; }
+  .dark .card { background: #2c2c2e; }
+  .card-label-row { display: flex; align-items: center; gap: 4px; margin-bottom: 5px; }
+  .card-label { font-size: 11px; font-weight: 500; color: #8e8e93; }
+  .info-btn { width: 11px; height: 11px; border-radius: 50%; border: 1px solid #c7c7cc; background: none; cursor: pointer; font-size: 7px; font-weight: 500; color: #aeaeb2; display: inline-flex; align-items: center; justify-content: center; padding: 0; flex-shrink: 0; }
+  .dark .info-btn { border-color: #48484a; color: #636366; }
+  .tooltip { display: none; position: absolute; top: 36px; left: 12px; right: 12px; z-index: 10; border-radius: 10px; padding: 9px 11px; font-size: 11px; line-height: 1.6; }
+  .light .tooltip { background: #1c1c1e; color: #f2f2f7; }
+  .dark .tooltip { background: #f2f2f7; color: #1c1c1e; }
+  .tooltip.show { display: block; }
+  .card-value { font-size: 20px; font-weight: 500; line-height: 1.1; }
+  .card-change { font-size: 12px; margin-top: 3px; font-weight: 500; }
+  .up { color: #30d158; }
+  .down { color: #ff453a; }
+  .neutral { color: #8e8e93; }
+  .card-full { margin: 0 16px 10px; border-radius: 16px; padding: 14px 16px; position: relative; }
+  .light .card-full { background: #ffffff; }
+  .dark .card-full { background: #2c2c2e; }
+  .fear-bar-wrap { margin-top: 10px; height: 6px; border-radius: 3px; overflow: hidden; }
+  .light .fear-bar-wrap { background: #e5e5ea; }
+  .dark .fear-bar-wrap { background: #3a3a3c; }
+  .fear-bar { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #30d158, #ffd60a, #ff453a); }
+  .fear-indicator { margin-top: 5px; display: flex; justify-content: space-between; font-size: 10px; color: #8e8e93; }
+  .supply-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 0.5px solid; }
+  .light .supply-row { border-color: #f2f2f7; }
+  .dark .supply-row { border-color: #3a3a3c; }
+  .supply-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .supply-row:first-child { padding-top: 0; }
+  .supply-name { font-size: 12px; font-weight: 500; }
+  .supply-val { font-size: 13px; font-weight: 500; }
+  .tag { font-size: 9px; padding: 2px 6px; border-radius: 6px; font-weight: 500; margin-left: 4px; vertical-align: middle; }
+  .tag-lev { background: #fff3cd; color: #856404; }
+  .tag-inv { background: #fde8e8; color: #a32d2d; }
+  .tag-etf { background: #e8f0fe; color: #185fa5; }
+  .dark .tag-lev { background: #3d2e00; color: #ffd60a; }
+  .dark .tag-inv { background: #3d0000; color: #ff6b6b; }
+  .dark .tag-etf { background: #002244; color: #85b7eb; }
+  .updated { font-size: 11px; text-align: center; padding: 12px 0 16px; color: #8e8e93; }
+</style>
+</head>
+<body class="light">
+<div class="app light" id="app">
+  <div class="header">
+    <div>
+      <div class="header-title">moneylive</div>
+      <div class="header-sub" id="datetime">로딩 중...</div>
+    </div>
+    <button class="toggle-btn" onclick="toggleMode()">🌙 다크</button>
+  </div>
+
+  <!-- 미국 시장 -->
+  <div class="section-label">미국 시장</div>
+  <div class="cards">
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">S&P 500</span><button class="info-btn" onclick="toggleTip('t1')">?</button></div>
+      <div class="tooltip" id="t1">미국 대형주 500개를 모은 지수예요. 미국 경제 전체의 흐름을 보는 대표 지표예요.</div>
+      <div class="card-value" id="sp500">-</div><div class="card-change" id="sp500-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">나스닥</span><button class="info-btn" onclick="toggleTip('t2')">?</button></div>
+      <div class="tooltip" id="t2">애플, 구글, 엔비디아 등 기술주 중심의 지수예요. 빅테크 흐름을 파악할 때 봐요.</div>
+      <div class="card-value" id="nasdaq">-</div><div class="card-change" id="nasdaq-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">다우존스</span><button class="info-btn" onclick="toggleTip('t3')">?</button></div>
+      <div class="tooltip" id="t3">미국 전통 우량 대기업 30개의 지수예요. 100년 이상 된 가장 오래된 주가지수예요.</div>
+      <div class="card-value" id="dow">-</div><div class="card-change" id="dow-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">VIX 공포지수</span><button class="info-btn" onclick="toggleTip('t4')">?</button></div>
+      <div class="tooltip" id="t4">시장의 변동성과 불안감을 수치로 나타낸 지수예요. 20 이상이면 불안, 30 이상이면 공포 구간이에요.</div>
+      <div class="card-value" id="vix">-</div><div class="card-change" id="vix-chg">-</div>
+    </div>
+  </div>
+
+  <!-- 미국 ETF -->
+  <div class="section-label">미국 ETF</div>
+  <div class="cards">
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">SPY <span class="tag tag-etf">ETF</span></span><button class="info-btn" onclick="toggleTip('t5')">?</button></div>
+      <div class="tooltip" id="t5">S&P500을 그대로 추종하는 ETF예요. 미국 시장 전체에 분산투자하는 가장 대표적인 상품이에요.</div>
+      <div class="card-value" id="spy">-</div><div class="card-change" id="spy-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">QQQ <span class="tag tag-etf">ETF</span></span><button class="info-btn" onclick="toggleTip('t6')">?</button></div>
+      <div class="tooltip" id="t6">나스닥100을 추종하는 ETF예요. 기술주 중심으로 성장주에 투자하고 싶을 때 사용해요.</div>
+      <div class="card-value" id="qqq">-</div><div class="card-change" id="qqq-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">TQQQ <span class="tag tag-lev">3배</span></span><button class="info-btn" onclick="toggleTip('t7')">?</button></div>
+      <div class="tooltip" id="t7">나스닥100의 일일 수익률을 3배로 추종해요. 변동성이 매우 크므로 주의가 필요해요.</div>
+      <div class="card-value" id="tqqq">-</div><div class="card-change" id="tqqq-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">SQQQ <span class="tag tag-inv">인버스</span></span><button class="info-btn" onclick="toggleTip('t8')">?</button></div>
+      <div class="tooltip" id="t8">나스닥100이 하락하면 3배로 수익이 나는 인버스 ETF예요. 하락장 베팅용이에요.</div>
+      <div class="card-value" id="sqqq">-</div><div class="card-change" id="sqqq-chg">-</div>
+    </div>
+  </div>
+
+  <!-- 환율 -->
+  <div class="section-label">환율</div>
+  <div class="cards">
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">원/달러</span><button class="info-btn" onclick="toggleTip('t9')">?</button></div>
+      <div class="tooltip" id="t9">1달러를 사려면 원화가 얼마나 필요한지를 나타내요. 높을수록 원화 가치가 낮은 거예요.</div>
+      <div class="card-value" id="usdkrw">-</div><div class="card-change" id="usdkrw-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">원/엔 (100)</span><button class="info-btn" onclick="toggleTip('t10')">?</button></div>
+      <div class="tooltip" id="t10">100엔을 사려면 원화가 얼마나 필요한지를 나타내요. 일본 여행이나 일학개미에게 중요해요.</div>
+      <div class="card-value" id="jpykrw">-</div><div class="card-change" id="jpykrw-chg">-</div>
+    </div>
+  </div>
+
+  <!-- 공포 & 탐욕 -->
+  <div class="section-label">공포 & 탐욕</div>
+  <div class="card-full">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        <div class="card-label-row"><span class="card-label">CNN Fear & Greed</span><button class="info-btn" onclick="toggleTip('t11')">?</button></div>
+        <div class="tooltip" id="t11">CNN이 산출하는 시장 심리 지표예요. 0에 가까울수록 극단적 공포, 100에 가까울수록 극단적 탐욕이에요.</div>
+        <div class="card-value" id="fear-val">-</div>
+      </div>
+      <div style="text-align:right;">
+        <div class="card-label">전주 대비</div>
+        <div style="font-size:14px;font-weight:500;" id="fear-prev">-</div>
+      </div>
+    </div>
+    <div class="fear-bar-wrap"><div class="fear-bar"></div></div>
+    <div class="fear-indicator"><span>극단적 공포</span><span>중립</span><span>극단적 탐욕</span></div>
+  </div>
+
+  <!-- 한국 시장 -->
+  <div class="section-label">한국 시장</div>
+  <div class="cards">
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">코스피</span><button class="info-btn" onclick="toggleTip('t12')">?</button></div>
+      <div class="tooltip" id="t12">한국 대형주 중심의 종합주가지수예요. 삼성전자, SK하이닉스 등 대기업 비중이 높아요.</div>
+      <div class="card-value" id="kospi">-</div><div class="card-change" id="kospi-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">코스닥</span><button class="info-btn" onclick="toggleTip('t13')">?</button></div>
+      <div class="tooltip" id="t13">중소형 성장주 중심의 지수예요. 바이오, 게임, IT 중소기업들이 많이 포함돼 있어요.</div>
+      <div class="card-value" id="kosdaq">-</div><div class="card-change" id="kosdaq-chg">-</div>
+    </div>
+  </div>
+
+  <!-- 한국 ETF -->
+  <div class="section-label">한국 ETF</div>
+  <div class="cards">
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">KODEX 200 <span class="tag tag-etf">ETF</span></span><button class="info-btn" onclick="toggleTip('t14')">?</button></div>
+      <div class="tooltip" id="t14">코스피200을 추종하는 국내 대표 ETF예요. 한국 대형주 전체에 분산투자하는 효과가 있어요.</div>
+      <div class="card-value" id="kodex200">-</div><div class="card-change" id="kodex200-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">KODEX 코스닥 <span class="tag tag-etf">ETF</span></span><button class="info-btn" onclick="toggleTip('t15')">?</button></div>
+      <div class="tooltip" id="t15">코스닥150을 추종하는 ETF예요. 코스닥 중소형 성장주에 분산투자할 수 있어요.</div>
+      <div class="card-value" id="kodexkosdaq">-</div><div class="card-change" id="kodexkosdaq-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">KODEX 레버리지 <span class="tag tag-lev">2배</span></span><button class="info-btn" onclick="toggleTip('t16')">?</button></div>
+      <div class="tooltip" id="t16">코스피200 일일 수익률을 2배로 추종해요. 상승장엔 2배 수익, 하락장엔 2배 손실이에요.</div>
+      <div class="card-value" id="kodexlev">-</div><div class="card-change" id="kodexlev-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">KODEX 인버스 <span class="tag tag-inv">인버스</span></span><button class="info-btn" onclick="toggleTip('t17')">?</button></div>
+      <div class="tooltip" id="t17">코스피200이 하락하면 수익이 나는 인버스 ETF예요. 하락장 또는 헤지 목적으로 활용해요.</div>
+      <div class="card-value" id="kodexinv">-</div><div class="card-change" id="kodexinv-chg">-</div>
+    </div>
+  </div>
+
+  <!-- 수급 동향 -->
+  <div class="section-label">전일 수급 동향 (코스피)</div>
+  <div class="card-full">
+    <div class="card-label-row" style="margin-bottom:8px;">
+      <span class="card-label">외국인 / 기관 / 개인 순매수</span>
+      <button class="info-btn" onclick="toggleTip('t18')">?</button>
+    </div>
+    <div class="tooltip" id="t18">전날 장 마감 기준 데이터예요. 순매수가 양수면 매수 우위, 음수면 매도 우위를 의미해요.</div>
+    <div class="supply-row">
+      <span class="supply-name">외국인</span>
+      <span class="supply-val" id="foreign">-</span>
+    </div>
+    <div class="supply-row">
+      <span class="supply-name">기관</span>
+      <span class="supply-val" id="institution">-</span>
+    </div>
+    <div class="supply-row">
+      <span class="supply-name">개인</span>
+      <span class="supply-val" id="individual">-</span>
+    </div>
+  </div>
+
+  <div class="updated" id="updated">데이터 로딩 중...</div>
+</div>
+
+<script>
+  // ── 유틸 ──────────────────────────────────────────
+  function toggleTip(id) {
+    document.querySelectorAll('.tooltip').forEach(t => { if (t.id !== id) t.classList.remove('show'); });
+    document.getElementById(id).classList.toggle('show');
+  }
+
+  function toggleMode() {
+    const app = document.getElementById('app');
+    const body = document.body;
+    const btn = app.querySelector('.toggle-btn');
+    const isDark = app.classList.contains('dark');
+    app.className = isDark ? 'app light' : 'app dark';
+    body.className = isDark ? 'light' : 'dark';
+    btn.textContent = isDark ? '🌙 다크' : '☀️ 라이트';
+  }
+
+  function setVal(id, value, change) {
+    const el = document.getElementById(id);
+    const chgEl = document.getElementById(id + '-chg');
+    if (el) el.textContent = value;
+    if (chgEl && change !== undefined) {
+      const isUp = change >= 0;
+      chgEl.textContent = (isUp ? '▲ +' : '▼ ') + Math.abs(change).toFixed(2) + '%';
+      chgEl.className = 'card-change ' + (isUp ? 'up' : 'down');
+    }
+  }
+
+  function setDatetime() {
+    const now = new Date();
+    const opts = { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+    document.getElementById('datetime').textContent = '오늘 ' + now.toLocaleDateString('ko-KR', opts);
+  }
+
+  // ── Yahoo Finance (CORS 프록시) ───────────────────
+  async function fetchYahoo(symbol) {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const result = data.chart.result[0];
+    const closes = result.indicators.quote[0].close;
+    const prev = closes[closes.length - 2];
+    const curr = closes[closes.length - 1];
+    const change = ((curr - prev) / prev) * 100;
+    return { value: curr, change };
+  }
+
+  // ── ExchangeRate API ──────────────────────────────
+  async function fetchExchange() {
+    const res = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+    const data = await res.json();
+    const krw = data.rates.KRW;
+    const jpy = data.rates.JPY;
+    const krwPerJpy = (krw / jpy) * 100;
+    return { usdkrw: krw, jpykrw: krwPerJpy };
+  }
+
+  // ── CNN Fear & Greed ──────────────────────────────
+  async function fetchFearGreed() {
+    const res = await fetch('https://production.dataviz.cnn.io/index/fearandgreed/graphdata');
+    const data = await res.json();
+    const current = data.fear_and_greed;
+    const prev = data.fear_and_greed_historical?.previous_week?.score;
+    return { score: Math.round(current.score), label: current.rating, prevScore: prev ? Math.round(prev) : null };
+  }
+
+  function fearLabel(score) {
+    if (score <= 24) return '극단적 공포';
+    if (score <= 44) return '공포';
+    if (score <= 55) return '중립';
+    if (score <= 75) return '탐욕';
+    return '극단적 탐욕';
+  }
+
+  // ── 수급 (KRX 전일 기준 샘플) ─────────────────────
+  function setSupply() {
+    // KRX 실시간 API는 CORS 제한으로 직접 호출 불가
+    // 실제 배포 시 서버리스 함수 또는 KRX Open API 키 필요
+    // 아래는 샘플 데이터
+    const data = { foreign: -3241, institution: 1872, individual: 1540 };
+    ['foreign', 'institution', 'individual'].forEach(key => {
+      const el = document.getElementById(key);
+      const val = data[key];
+      const isUp = val >= 0;
+      el.textContent = (isUp ? '▲ +' : '▼ ') + Math.abs(val).toLocaleString() + '억';
+      el.className = 'supply-val ' + (isUp ? 'up' : 'down');
+    });
+  }
+
+  // ── 전체 로드 ─────────────────────────────────────
+  async function loadAll() {
+    setDatetime();
+
+    try {
+      const [sp, nq, dj, vx, spy, qqq, tqqq, sqqq, k200, kq, klev, kinv] = await Promise.all([
+        fetchYahoo('^GSPC'), fetchYahoo('^IXIC'), fetchYahoo('^DJI'), fetchYahoo('^VIX'),
+        fetchYahoo('SPY'),   fetchYahoo('QQQ'),  fetchYahoo('TQQQ'), fetchYahoo('SQQQ'),
+        fetchYahoo('069500.KS'), fetchYahoo('229200.KS'), fetchYahoo('122630.KS'), fetchYahoo('114800.KS')
+      ]);
+
+      setVal('sp500',  sp.value.toLocaleString('en', {maximumFractionDigits:0}), sp.change);
+      setVal('nasdaq', nq.value.toLocaleString('en', {maximumFractionDigits:0}), nq.change);
+      setVal('dow',    dj.value.toLocaleString('en', {maximumFractionDigits:0}), dj.change);
+
+      const vixEl = document.getElementById('vix');
+      vixEl.textContent = vx.value.toFixed(1);
+      vixEl.style.color = vx.value >= 30 ? '#ff453a' : vx.value >= 20 ? '#ff9f0a' : '#30d158';
+      const vixChg = document.getElementById('vix-chg');
+      vixChg.textContent = (vx.change >= 0 ? '▲ +' : '▼ ') + Math.abs(vx.change).toFixed(2) + '%';
+      vixChg.className = 'card-change ' + (vx.change >= 0 ? 'down' : 'up');
+
+      setVal('spy',  '$' + spy.value.toFixed(1),  spy.change);
+      setVal('qqq',  '$' + qqq.value.toFixed(1),  qqq.change);
+      setVal('tqqq', '$' + tqqq.value.toFixed(2), tqqq.change);
+      setVal('sqqq', '$' + sqqq.value.toFixed(2), sqqq.change);
+
+      setVal('kodex200',     k200.value.toLocaleString('ko'),  k200.change);
+      setVal('kodexkosdaq',  kq.value.toLocaleString('ko'),    kq.change);
+      setVal('kodexlev',     klev.value.toLocaleString('ko'),  klev.change);
+      setVal('kodexinv',     kinv.value.toLocaleString('ko'),  kinv.change);
+
+      // 코스피/코스닥 (KRX 직접 CORS 제한 → Yahoo Finance KRX 티커 사용)
+      const [ksp, ksdq] = await Promise.all([fetchYahoo('^KS11'), fetchYahoo('^KQ11')]);
+      setVal('kospi',  ksp.value.toLocaleString('ko', {maximumFractionDigits:1}),  ksp.change);
+      setVal('kosdaq', ksdq.value.toLocaleString('ko', {maximumFractionDigits:1}), ksdq.change);
+
+    } catch(e) {
+      console.warn('지수 데이터 로딩 실패:', e);
+    }
+
+    try {
+      const ex = await fetchExchange();
+      document.getElementById('usdkrw').textContent = ex.usdkrw.toFixed(0) + '원';
+      document.getElementById('usdkrw-chg').textContent = '실시간';
+      document.getElementById('jpykrw').textContent = ex.jpykrw.toFixed(0) + '원';
+      document.getElementById('jpykrw-chg').textContent = '실시간';
+    } catch(e) {
+      console.warn('환율 데이터 로딩 실패:', e);
+    }
+
+    try {
+      const fg = await fetchFearGreed();
+      const fEl = document.getElementById('fear-val');
+      fEl.textContent = fg.score + ' ' + fearLabel(fg.score);
+      fEl.style.color = fg.score <= 44 ? '#ff453a' : fg.score <= 55 ? '#ff9f0a' : '#30d158';
+      if (fg.prevScore !== null) {
+        const diff = fg.score - fg.prevScore;
+        const fp = document.getElementById('fear-prev');
+        fp.textContent = (diff >= 0 ? '▲ +' : '▼ ') + Math.abs(diff) + 'p';
+        fp.className = diff >= 0 ? 'up' : 'down';
+      }
+    } catch(e) {
+      console.warn('공포지수 로딩 실패:', e);
+    }
+
+    setSupply();
+
+    document.getElementById('updated').textContent =
+      '마지막 업데이트 ' + new Date().toLocaleTimeString('ko-KR') + ' · 수급은 전일 마감 기준';
+  }
+
+  loadAll();
+  setInterval(loadAll, 300000); // 5분마다 자동 갱신
+</script>
+</body>
+</html>
