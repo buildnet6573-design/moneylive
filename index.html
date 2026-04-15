@@ -71,89 +71,6 @@
     <button class="toggle-btn" onclick="toggleMode()">🌙</button>
   </div>
 
-  <!-- 미국 시장 -->
-  <div class="section-label">미국 시장</div>
-  <div class="cards">
-    <div class="card">
-      <div class="card-label-row"><span class="card-label">S&P 500</span><button class="info-btn" onclick="toggleTip('t1')">?</button></div>
-      <div class="tooltip" id="t1">미국 대형주 500개를 모은 지수예요. 미국 경제 전체의 흐름을 보는 대표 지표예요.</div>
-      <div class="card-value" id="sp500">-</div><div class="card-change" id="sp500-chg">-</div>
-    </div>
-    <div class="card">
-      <div class="card-label-row"><span class="card-label">나스닥</span><button class="info-btn" onclick="toggleTip('t2')">?</button></div>
-      <div class="tooltip" id="t2">애플, 구글, 엔비디아 등 기술주 중심의 지수예요. 빅테크 흐름을 파악할 때 봐요.</div>
-      <div class="card-value" id="nasdaq">-</div><div class="card-change" id="nasdaq-chg">-</div>
-    </div>
-    <div class="card">
-      <div class="card-label-row"><span class="card-label">다우존스</span><button class="info-btn" onclick="toggleTip('t3')">?</button></div>
-      <div class="tooltip" id="t3">미국 전통 우량 대기업 30개의 지수예요. 100년 이상 된 가장 오래된 주가지수예요.</div>
-      <div class="card-value" id="dow">-</div><div class="card-change" id="dow-chg">-</div>
-    </div>
-    <div class="card">
-      <div class="card-label-row"><span class="card-label">VIX 공포지수</span><button class="info-btn" onclick="toggleTip('t4')">?</button></div>
-      <div class="tooltip" id="t4">시장의 변동성과 불안감을 수치로 나타낸 지수예요. 20 이상이면 불안, 30 이상이면 공포 구간이에요.</div>
-      <div class="card-value" id="vix">-</div><div class="card-change" id="vix-chg">-</div>
-    </div>
-  </div>
-
-  <!-- 미국 ETF -->
-  <div class="section-label">미국 ETF</div>
-  <div class="cards">
-    <div class="card">
-      <div class="card-label-row"><span class="card-label">SPY <span class="tag tag-etf">ETF</span></span><button class="info-btn" onclick="toggleTip('t5')">?</button></div>
-      <div class="tooltip" id="t5">S&P500을 그대로 추종하는 ETF예요. 미국 시장 전체에 분산투자하는 가장 대표적인 상품이에요.</div>
-      <div class="card-value" id="spy">-</div><div class="card-change" id="spy-chg">-</div>
-    </div>
-    <div class="card">
-      <div class="card-label-row"><span class="card-label">QQQ <span class="tag tag-etf">ETF</span></span><button class="info-btn" onclick="toggleTip('t6')">?</button></div>
-      <div class="tooltip" id="t6">나스닥100을 추종하는 ETF예요. 기술주 중심으로 성장주에 투자하고 싶을 때 사용해요.</div>
-      <div class="card-value" id="qqq">-</div><div class="card-change" id="qqq-chg">-</div>
-    </div>
-    <div class="card">
-      <div class="card-label-row"><span class="card-label">TQQQ <span class="tag tag-lev">3배</span></span><button class="info-btn" onclick="toggleTip('t7')">?</button></div>
-      <div class="tooltip" id="t7">나스닥100의 일일 수익률을 3배로 추종해요. 변동성이 매우 크므로 주의가 필요해요.</div>
-      <div class="card-value" id="tqqq">-</div><div class="card-change" id="tqqq-chg">-</div>
-    </div>
-    <div class="card">
-      <div class="card-label-row"><span class="card-label">SQQQ <span class="tag tag-inv">인버스</span></span><button class="info-btn" onclick="toggleTip('t8')">?</button></div>
-      <div class="tooltip" id="t8">나스닥100이 하락하면 3배로 수익이 나는 인버스 ETF예요. 하락장 베팅용이에요.</div>
-      <div class="card-value" id="sqqq">-</div><div class="card-change" id="sqqq-chg">-</div>
-    </div>
-  </div>
-
-  <!-- 환율 -->
-  <div class="section-label">환율</div>
-  <div class="cards">
-    <div class="card">
-      <div class="card-label-row"><span class="card-label">원/달러</span><button class="info-btn" onclick="toggleTip('t9')">?</button></div>
-      <div class="tooltip" id="t9">1달러를 사려면 원화가 얼마나 필요한지를 나타내요. 높을수록 원화 가치가 낮은 거예요.</div>
-      <div class="card-value" id="usdkrw">-</div><div class="card-change" id="usdkrw-chg">-</div>
-    </div>
-    <div class="card">
-      <div class="card-label-row"><span class="card-label">원/엔 (100)</span><button class="info-btn" onclick="toggleTip('t10')">?</button></div>
-      <div class="tooltip" id="t10">100엔을 사려면 원화가 얼마나 필요한지를 나타내요. 일본 여행이나 일학개미에게 중요해요.</div>
-      <div class="card-value" id="jpykrw">-</div><div class="card-change" id="jpykrw-chg">-</div>
-    </div>
-  </div>
-
-  <!-- 공포 & 탐욕 -->
-  <div class="section-label">공포 & 탐욕</div>
-  <div class="card-full">
-    <div style="display:flex; justify-content:space-between; align-items:center;">
-      <div>
-        <div class="card-label-row"><span class="card-label">CNN Fear & Greed</span><button class="info-btn" onclick="toggleTip('t11')">?</button></div>
-        <div class="tooltip" id="t11">CNN이 산출하는 시장 심리 지표예요. 0에 가까울수록 극단적 공포, 100에 가까울수록 극단적 탐욕이에요.</div>
-        <div class="card-value" id="fear-val">-</div>
-      </div>
-      <div style="text-align:right;">
-        <div class="card-label">전주 대비</div>
-        <div style="font-size:14px;font-weight:500;" id="fear-prev">-</div>
-      </div>
-    </div>
-    <div class="fear-bar-wrap"><div class="fear-bar"></div></div>
-    <div class="fear-indicator"><span>극단적 공포</span><span>중립</span><span>극단적 탐욕</span></div>
-  </div>
-
   <!-- 한국 시장 -->
   <div class="section-label">한국 시장</div>
   <div class="cards">
@@ -213,6 +130,89 @@
     <div class="supply-row">
       <span class="supply-name">개인</span>
       <span class="supply-val" id="individual">-</span>
+    </div>
+  </div>
+
+  <!-- 미국 시장 -->
+  <div class="section-label">미국 시장</div>
+  <div class="cards">
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">S&P 500</span><button class="info-btn" onclick="toggleTip('t1')">?</button></div>
+      <div class="tooltip" id="t1">미국 대형주 500개를 모은 지수예요. 미국 경제 전체의 흐름을 보는 대표 지표예요.</div>
+      <div class="card-value" id="sp500">-</div><div class="card-change" id="sp500-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">나스닥</span><button class="info-btn" onclick="toggleTip('t2')">?</button></div>
+      <div class="tooltip" id="t2">애플, 구글, 엔비디아 등 기술주 중심의 지수예요. 빅테크 흐름을 파악할 때 봐요.</div>
+      <div class="card-value" id="nasdaq">-</div><div class="card-change" id="nasdaq-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">다우존스</span><button class="info-btn" onclick="toggleTip('t3')">?</button></div>
+      <div class="tooltip" id="t3">미국 전통 우량 대기업 30개의 지수예요. 100년 이상 된 가장 오래된 주가지수예요.</div>
+      <div class="card-value" id="dow">-</div><div class="card-change" id="dow-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">VIX 공포지수</span><button class="info-btn" onclick="toggleTip('t4')">?</button></div>
+      <div class="tooltip" id="t4">시장의 변동성과 불안감을 수치로 나타낸 지수예요. 20 이상이면 불안, 30 이상이면 공포 구간이에요.</div>
+      <div class="card-value" id="vix">-</div><div class="card-change" id="vix-chg">-</div>
+    </div>
+  </div>
+
+  <!-- 미국 ETF -->
+  <div class="section-label">미국 ETF</div>
+  <div class="cards">
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">SPY <span class="tag tag-etf">ETF</span></span><button class="info-btn" onclick="toggleTip('t5')">?</button></div>
+      <div class="tooltip" id="t5">S&P500을 그대로 추종하는 ETF예요. 미국 시장 전체에 분산투자하는 가장 대표적인 상품이에요.</div>
+      <div class="card-value" id="spy">-</div><div class="card-change" id="spy-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">QQQ <span class="tag tag-etf">ETF</span></span><button class="info-btn" onclick="toggleTip('t6')">?</button></div>
+      <div class="tooltip" id="t6">나스닥100을 추종하는 ETF예요. 기술주 중심으로 성장주에 투자하고 싶을 때 사용해요.</div>
+      <div class="card-value" id="qqq">-</div><div class="card-change" id="qqq-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">TQQQ <span class="tag tag-lev">3배</span></span><button class="info-btn" onclick="toggleTip('t7')">?</button></div>
+      <div class="tooltip" id="t7">나스닥100의 일일 수익률을 3배로 추종해요. 변동성이 매우 크므로 주의가 필요해요.</div>
+      <div class="card-value" id="tqqq">-</div><div class="card-change" id="tqqq-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">SQQQ <span class="tag tag-inv">인버스</span></span><button class="info-btn" onclick="toggleTip('t8')">?</button></div>
+      <div class="tooltip" id="t8">나스닥100이 하락하면 3배로 수익이 나는 인버스 ETF예요. 하락장 베팅용이에요.</div>
+      <div class="card-value" id="sqqq">-</div><div class="card-change" id="sqqq-chg">-</div>
+    </div>
+  </div>
+
+  <!-- 공포 & 탐욕 -->
+  <div class="section-label">공포 & 탐욕</div>
+  <div class="card-full">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        <div class="card-label-row"><span class="card-label">CNN Fear & Greed</span><button class="info-btn" onclick="toggleTip('t11')">?</button></div>
+        <div class="tooltip" id="t11">CNN이 산출하는 시장 심리 지표예요. 0에 가까울수록 극단적 공포, 100에 가까울수록 극단적 탐욕이에요.</div>
+        <div class="card-value" id="fear-val">-</div>
+      </div>
+      <div style="text-align:right;">
+        <div class="card-label">전주 대비</div>
+        <div style="font-size:14px;font-weight:500;" id="fear-prev">-</div>
+      </div>
+    </div>
+    <div class="fear-bar-wrap"><div class="fear-bar"></div></div>
+    <div class="fear-indicator"><span>극단적 공포</span><span>중립</span><span>극단적 탐욕</span></div>
+  </div>
+
+   <!-- 환율 -->
+  <div class="section-label">환율</div>
+  <div class="cards">
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">원/달러</span><button class="info-btn" onclick="toggleTip('t9')">?</button></div>
+      <div class="tooltip" id="t9">1달러를 사려면 원화가 얼마나 필요한지를 나타내요. 높을수록 원화 가치가 낮은 거예요.</div>
+      <div class="card-value" id="usdkrw">-</div><div class="card-change" id="usdkrw-chg">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label-row"><span class="card-label">원/엔 (100)</span><button class="info-btn" onclick="toggleTip('t10')">?</button></div>
+      <div class="tooltip" id="t10">100엔을 사려면 원화가 얼마나 필요한지를 나타내요. 일본 여행이나 일학개미에게 중요해요.</div>
+      <div class="card-value" id="jpykrw">-</div><div class="card-change" id="jpykrw-chg">-</div>
     </div>
   </div>
 
