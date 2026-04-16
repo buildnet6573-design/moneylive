@@ -297,21 +297,18 @@
     document.getElementById('live-visitors').textContent = Math.floor(Math.random() * 5) + 1;
   }
 
+  // ── Netlify 함수 통해서 Yahoo Finance 호출 ────────
   async function fetchYahoo(symbol) {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`;
-    const res = await fetch(url);
-    const data = await res.json();
-    const result = data.chart.result[0];
-    const closes = result.indicators.quote[0].close;
-    const prev = closes[closes.length - 2];
-    const curr = closes[closes.length - 1];
-    return { value: curr, change: ((curr - prev) / prev) * 100 };
+    const res = await fetch(`/.netlify/functions/yahoo?symbol=${encodeURIComponent(symbol)}`);
+    if (!res.ok) throw new Error('Yahoo 함수 오류');
+    return await res.json();
   }
 
+  // ── 한투 API ──────────────────────────────────────
   async function fetchKIS() {
     try {
       const res = await fetch('/.netlify/functions/kis');
-      if (!res.ok) throw new Error('KIS API 오류');
+      if (!res.ok) throw new Error('KIS 함수 오류');
       return await res.json();
     } catch(e) {
       console.warn('한투 API 실패:', e);
@@ -319,12 +316,14 @@
     }
   }
 
+  // ── 환율 API ──────────────────────────────────────
   async function fetchExchange() {
     const res = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
     const data = await res.json();
     return { usdkrw: data.rates.KRW, jpykrw: (data.rates.KRW / data.rates.JPY) * 100 };
   }
 
+  // ── CNN 공포탐욕 ───────────────────────────────────
   async function fetchFearGreed() {
     const res = await fetch('https://production.dataviz.cnn.io/index/fearandgreed/graphdata');
     const data = await res.json();
@@ -355,6 +354,7 @@
     setHeaderUpdate();
     setSupplyDate();
 
+    // 한투 API
     const kis = await fetchKIS();
     if (kis) {
       if (kis.kospi?.value) setVal('kospi', parseFloat(kis.kospi.value).toLocaleString('ko', {maximumFractionDigits:1}), kis.kospi.change);
@@ -366,37 +366,51 @@
       }
     }
 
+    // Yahoo Finance (Netlify 함수 경유)
     try {
-      const [sp, nq, dj, vx, spy, qqq, tqqq, sqqq, k200, kq, klev, kinv, ksp, ksdq] = await Promise.all([
-        fetchYahoo('^GSPC'), fetchYahoo('^IXIC'), fetchYahoo('^DJI'), fetchYahoo('^VIX'),
-        fetchYahoo('SPY'), fetchYahoo('QQQ'), fetchYahoo('TQQQ'), fetchYahoo('SQQQ'),
-        fetchYahoo('069500.KS'), fetchYahoo('229200.KS'), fetchYahoo('122630.KS'), fetchYahoo('114800.KS'),
-        fetchYahoo('^KS11'), fetchYahoo('^KQ11')
-      ]);
-      setVal('sp500', sp.value.toLocaleString('en', {maximumFractionDigits:0}), sp.change);
-      setVal('nasdaq', nq.value.toLocaleString('en', {maximumFractionDigits:0}), nq.change);
-      setVal('dow', dj.value.toLocaleString('en', {maximumFractionDigits:0}), dj.change);
-      const vixEl = document.getElementById('vix');
-      vixEl.textContent = vx.value.toFixed(1);
-      vixEl.classList.remove('loading');
-      vixEl.style.color = vx.value >= 30 ? '#ff453a' : vx.value >= 20 ? '#ff9f0a' : '#30d158';
-      const vixChg = document.getElementById('vix-chg');
-      vixChg.textContent = (vx.change >= 0 ? '▲ +' : '▼ ') + Math.abs(vx.change).toFixed(2) + '%';
-      vixChg.className = 'card-change ' + (vx.change >= 0 ? 'down' : 'up');
-      setVal('spy', '$' + spy.value.toFixed(1), spy.change);
-      setVal('qqq', '$' + qqq.value.toFixed(1), qqq.change);
-      setVal('tqqq', '$' + tqqq.value.toFixed(2), tqqq.change);
-      setVal('sqqq', '$' + sqqq.value.toFixed(2), sqqq.change);
-      setVal('kodex200', k200.value.toLocaleString('ko'), k200.change);
-      setVal('kodexkosdaq', kq.value.toLocaleString('ko'), kq.change);
-      setVal('kodexlev', klev.value.toLocaleString('ko'), klev.change);
-      setVal('kodexinv', kinv.value.toLocaleString('ko'), kinv.change);
-      if (!kis || !kis.kospi?.value) {
-        setVal('kospi', ksp.value.toLocaleString('ko', {maximumFractionDigits:1}), ksp.change);
-        setVal('kosdaq', ksdq.value.toLocaleString('ko', {maximumFractionDigits:1}), ksdq.change);
-      }
+      const symbols = [
+        ['^GSPC', 'sp500', v => v.toLocaleString('en', {maximumFractionDigits:0})],
+        ['^IXIC', 'nasdaq', v => v.toLocaleString('en', {maximumFractionDigits:0})],
+        ['^DJI', 'dow', v => v.toLocaleString('en', {maximumFractionDigits:0})],
+        ['SPY', 'spy', v => '$' + v.toFixed(1)],
+        ['QQQ', 'qqq', v => '$' + v.toFixed(1)],
+        ['TQQQ', 'tqqq', v => '$' + v.toFixed(2)],
+        ['SQQQ', 'sqqq', v => '$' + v.toFixed(2)],
+        ['069500.KS', 'kodex200', v => v.toLocaleString('ko')],
+        ['229200.KS', 'kodexkosdaq', v => v.toLocaleString('ko')],
+        ['122630.KS', 'kodexlev', v => v.toLocaleString('ko')],
+        ['114800.KS', 'kodexinv', v => v.toLocaleString('ko')],
+        ['^KS11', 'kospi_y', v => v.toLocaleString('ko', {maximumFractionDigits:1})],
+        ['^KQ11', 'kosdaq_y', v => v.toLocaleString('ko', {maximumFractionDigits:1})],
+        ['^VIX', 'vix_raw', v => v.toFixed(1)],
+      ];
+
+      const results = await Promise.allSettled(symbols.map(([sym]) => fetchYahoo(sym)));
+
+      results.forEach((res, i) => {
+        const [sym, id, fmt] = symbols[i];
+        if (res.status !== 'fulfilled') return;
+        const { value, change } = res.value;
+
+        if (id === 'vix_raw') {
+          const vixEl = document.getElementById('vix');
+          vixEl.textContent = fmt(value);
+          vixEl.classList.remove('loading');
+          vixEl.style.color = value >= 30 ? '#ff453a' : value >= 20 ? '#ff9f0a' : '#30d158';
+          const vixChg = document.getElementById('vix-chg');
+          vixChg.textContent = (change >= 0 ? '▲ +' : '▼ ') + Math.abs(change).toFixed(2) + '%';
+          vixChg.className = 'card-change ' + (change >= 0 ? 'down' : 'up');
+          return;
+        }
+
+        if (id === 'kospi_y' && (!kis || !kis.kospi?.value)) setVal('kospi', fmt(value), change);
+        else if (id === 'kosdaq_y' && (!kis || !kis.kosdaq?.value)) setVal('kosdaq', fmt(value), change);
+        else if (id !== 'kospi_y' && id !== 'kosdaq_y') setVal(id, fmt(value), change);
+      });
+
     } catch(e) { console.warn('Yahoo 로딩 실패:', e); }
 
+    // 환율
     try {
       const ex = await fetchExchange();
       document.getElementById('usdkrw').textContent = ex.usdkrw.toFixed(0) + '원';
@@ -407,6 +421,7 @@
       document.getElementById('jpykrw-chg').textContent = '실시간';
     } catch(e) { console.warn('환율 로딩 실패:', e); }
 
+    // 공포탐욕
     try {
       const fg = await fetchFearGreed();
       const fEl = document.getElementById('fear-val');
