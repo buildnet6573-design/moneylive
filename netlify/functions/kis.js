@@ -1,6 +1,17 @@
 const https = require('https');
 
+// ── 토큰 캐시 (메모리에 저장, 만료 전까지 재사용) ──
+let cachedToken = null;
+let tokenExpiry = null;
+
 async function getToken(appKey, appSecret) {
+  const now = Date.now();
+
+  // 토큰이 있고 만료 30분 전까지는 재사용
+  if (cachedToken && tokenExpiry && now < tokenExpiry - 30 * 60 * 1000) {
+    return cachedToken;
+  }
+
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       grant_type: 'client_credentials',
@@ -20,7 +31,18 @@ async function getToken(appKey, appSecret) {
     const req = https.request(options, res => {
       let data = '';
       res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve(JSON.parse(data)));
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          cachedToken = parsed.access_token;
+          // 만료 시간 저장 (초 단위 → ms 변환)
+          tokenExpiry = now + (parsed.expires_in * 1000);
+          console.log('새 토큰 발급 완료, 만료:', new Date(tokenExpiry).toISOString());
+          resolve(cachedToken);
+        } catch(e) {
+          reject(e);
+        }
+      });
     });
     req.on('error', reject);
     req.write(body);
@@ -40,7 +62,10 @@ async function fetchKIS(path, headers) {
     const req = https.request(options, res => {
       let data = '';
       res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve(JSON.parse(data)));
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch(e) { reject(e); }
+      });
     });
     req.on('error', reject);
     req.end();
@@ -52,8 +77,7 @@ exports.handler = async (event) => {
   const appSecret = process.env.KIS_APP_SECRET;
 
   try {
-    const tokenData = await getToken(appKey, appSecret);
-    const token = tokenData.access_token;
+    const token = await getToken(appKey, appSecret);
 
     const baseHeaders = {
       'authorization': `Bearer ${token}`,
@@ -102,6 +126,7 @@ exports.handler = async (event) => {
   } catch (e) {
     return {
       statusCode: 500,
+      headers: { 'Access-Control-Allow-Origin': '*' },
       body: JSON.stringify({ error: e.message })
     };
   }
