@@ -254,27 +254,55 @@ async function fetchIndex(token, prev) {
 async function fetchSupply(token, prev) {
   log('💰 수급 동향 수집 중...');
   try {
+    // FHPTJ04040000: 시장별 투자자매매동향(일별) - 올바른 시장 전체 수급 API
     const r = await kisGet(
-      '/uapi/domestic-stock/v1/quotations/inquire-investor',
-      token, 'FHKST01010900',
-      { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: '0001' }
+      '/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-market',
+      token, 'FHPTJ04040000',
+      {
+        FID_COND_MRKT_DIV_CODE: 'U',
+        FID_INPUT_ISCD:   '0001', // 코스피
+        FID_INPUT_ISCD_1: '0001', // 코스피
+        FID_INPUT_ISCD_2: '1001', // 코스닥
+        FID_INPUT_DATE_1: getDate(-1), // 전일
+        FID_INPUT_DATE_2: getDate(0)   // 당일
+      }
     );
     const rows = r?.output;
     if (!rows?.length) throw new Error('데이터없음');
-    const today = rows[0];
+
+    // 가장 최근 영업일 데이터 (수급이 있는 첫 번째 행)
+    const today = rows.find(row =>
+      parseInt(row.frgn_ntby_qty||0) !== 0 ||
+      parseInt(row.orgn_ntby_qty||0) !== 0 ||
+      parseInt(row.prsn_ntby_qty||0) !== 0
+    ) || rows[0];
+
     const f    = parseInt(today.frgn_ntby_qty||0);
     const inst = parseInt(today.orgn_ntby_qty||0);
-    const ind  = parseInt(today.indv_ntby_qty||0);
+    const ind  = parseInt(today.prsn_ntby_qty||0); // 개인: prsn_ntby_qty
+
     if (f===0 && inst===0 && ind===0 && prev.supply) {
-      log('  ⚠️ 수급 모두 0 → 이전 데이터 유지');
+      log('  ⚠️ 수급 모두 0 (장 마감 전) → 이전 데이터 유지');
       return prev.supply;
     }
-    const history = rows.slice(1,5).map(h => ({
-      date: parseKisDate(h.stck_bsdt),
-      total: Math.round((parseInt(h.frgn_ntby_qty||0)+parseInt(h.orgn_ntby_qty||0)+parseInt(h.indv_ntby_qty||0))/1000000)
+
+    // 히스토리: 최근 4일
+    const history = rows.slice(0, 4).map(h => ({
+      date: parseKisDate(h.stck_bsop_date),
+      total: Math.round(
+        (parseInt(h.frgn_ntby_qty||0) + parseInt(h.orgn_ntby_qty||0) + parseInt(h.prsn_ntby_qty||0))
+        / 1000000
+      )
     }));
-    log(`  외국인: ${f} / 기관: ${inst} / 개인: ${ind}`);
-    return { foreign: today.frgn_ntby_qty, institution: today.orgn_ntby_qty, individual: today.indv_ntby_qty, history };
+
+    log(`  외국인: ${f} / 기관: ${inst} / 개인: ${ind} (날짜: ${today.stck_bsop_date})`);
+    return {
+      foreign:     today.frgn_ntby_qty,
+      institution: today.orgn_ntby_qty,
+      individual:  today.prsn_ntby_qty,
+      date:        parseKisDate(today.stck_bsop_date),
+      history
+    };
   } catch(e) {
     log(`  ⚠️ 수급 실패→이전유지: ${e.message}`);
     return prev.supply || null;
@@ -336,7 +364,8 @@ async function fetchKrEtf(token, prev) {
     kodexinv: '114800', kodexinv2: '251340', kodexsp: '379800'
   };
   const etf = { ...(prev.etf||{}) };
-  await Promise.allSettled(Object.entries(codes).map(async ([key, code]) => {
+  const sleep2 = (ms) => new Promise(r => setTimeout(r, ms));
+  for (const [key, code] of Object.entries(codes)) {
     try {
       const r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-price', token, 'FHKST01010100',
         { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: code });
@@ -344,7 +373,8 @@ async function fetchKrEtf(token, prev) {
       if (!o?.stck_prpr) throw new Error('데이터없음');
       etf[key] = { value: o.stck_prpr, change: parseFloat(o.prdy_ctrt||0) };
     } catch { log(`  ⚠️ ETF ${key} 실패→이전유지`); }
-  }));
+    await sleep2(150);
+  }
   log(`  ETF ${Object.keys(etf).length}개 완료`);
   return etf;
 }
@@ -364,13 +394,20 @@ async function fetchKrSectors(token, prev) {
     { code: '097950', name: '음식료',    tip: 'CJ제일제당, 오리온 등 식품 기업들이에요.' },
     { code: '282330', name: '유통',      tip: '롯데쇼핑, 이마트 등 유통 기업들이에요.' }
   ];
-  const results = await Promise.allSettled(sectors.map(async s => {
-    const r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-price', token, 'FHKST01010100',
-      { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: s.code });
-    const o = r?.output;
-    if (!o?.stck_prpr) throw new Error('데이터없음');
-    return { name: s.name, tip: s.tip, chg: parseFloat(o.prdy_ctrt||0), vol: parseInt(o.acml_tr_pbmn||0) };
-  }));
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const results = [];
+  for (const s of sectors) {
+    try {
+      const r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-price', token, 'FHKST01010100',
+        { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: s.code });
+      const o = r?.output;
+      if (!o?.stck_prpr) throw new Error('데이터없음');
+      results.push({ status: 'fulfilled', value: { name: s.name, tip: s.tip, chg: parseFloat(o.prdy_ctrt||0), vol: parseInt(o.acml_tr_pbmn||0) } });
+    } catch(e) {
+      results.push({ status: 'rejected' });
+    }
+    await sleep(200);
+  }
   const succeeded = results.filter(r => r.status==='fulfilled').map(r => r.value);
   if (succeeded.length > 0) { log(`  섹터 ${succeeded.length}개 완료`); return succeeded; }
   log('  ⚠️ 섹터 실패 → 이전유지');
@@ -381,7 +418,8 @@ async function fetchKrStocks(token, prev) {
   log('📋 KR 수급 종목 수집 중...');
   const prevStocks = prev.stocks || {};
   try {
-    const volRes = await kisGet('/uapi/domestic-stock/v1/ranking/trading-value', token, 'FHPST01710000',
+    // 거래량순위 (문서 148번: FHPST01710000 / volume-rank)
+    const volRes = await kisGet('/uapi/domestic-stock/v1/quotations/volume-rank', token, 'FHPST01710000',
       { FID_COND_MRKT_DIV_CODE: 'J', FID_COND_SCR_DIV_CODE: '20171',
         FID_INPUT_ISCD: '0000', FID_DIV_CLS_CODE: '0', FID_BLNG_CLS_CODE: '0',
         FID_TRGT_CLS_CODE: '111111111', FID_TRGT_EXLS_CLS_CODE: '000000',
@@ -391,18 +429,19 @@ async function fetchKrStocks(token, prev) {
       chg: parseFloat(s.prdy_ctrt||0), amt: parseInt(s.acml_tr_pbmn||0)
     }));
 
+    // 외국인기관 매매종목가집계 (문서 121번: FHPTJ04400000 / foreign-institution-total)
     const fetchRank = async (blng) => {
       try {
-        const r = await kisGet('/uapi/domestic-stock/v1/ranking/investor', token, 'FHPST01720000',
-          { FID_COND_MRKT_DIV_CODE: 'J', FID_COND_SCR_DIV_CODE: '20172',
+        const r = await kisGet('/uapi/domestic-stock/v1/quotations/foreign-institution-total', token, 'FHPTJ04400000',
+          { FID_COND_MRKT_DIV_CODE: 'J', FID_COND_SCR_DIV_CODE: '20171',
             FID_INPUT_ISCD: '0000', FID_DIV_CLS_CODE: '0', FID_BLNG_CLS_CODE: blng,
             FID_TRGT_CLS_CODE: '111111111', FID_TRGT_EXLS_CLS_CODE: '000000',
             FID_INPUT_PRICE_1: '', FID_INPUT_PRICE_2: '', FID_VOL_CNT: '', FID_INPUT_DATE_1: '' });
         return (r?.output||[]).slice(0,5).map(s => ({
           name: s.hts_kor_isnm, code: s.mksc_shrn_iscd,
-          chg: parseFloat(s.prdy_ctrt||0), amt: parseInt(s.ntby_qty||0)
+          chg: parseFloat(s.prdy_ctrt||0), amt: parseInt(s.ntby_qty||s.frgn_ntby_qty||0)
         }));
-      } catch { return null; }
+      } catch(e) { log(`  ⚠️ 랭킹(${blng}) 실패: ${e.message}`); return null; }
     };
 
     const [fB,fS,iB,iS,dB,dS] = await Promise.all([1,2,3,4,5,6].map(n => fetchRank(String(n))));
