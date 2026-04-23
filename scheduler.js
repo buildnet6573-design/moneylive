@@ -429,22 +429,24 @@ async function fetchKrStocks(token, prev) {
       chg: parseFloat(s.prdy_ctrt||0), amt: parseInt(s.acml_tr_pbmn||0)
     }));
 
-    // 외국인기관 매매종목가집계 (문서 121번: FHPTJ04400000 / foreign-institution-total)
-    const fetchRank = async (blng) => {
+    // 외국인기관 매매종목가집계: etcCls 1=외국인 2=기관 / rankSort 0=순매수 1=순매도
+    const fetchRank = async (etcCls, rankSort) => {
       try {
         const r = await kisGet('/uapi/domestic-stock/v1/quotations/foreign-institution-total', token, 'FHPTJ04400000',
-          { FID_COND_MRKT_DIV_CODE: 'J', FID_COND_SCR_DIV_CODE: '20171',
-            FID_INPUT_ISCD: '0000', FID_DIV_CLS_CODE: '0', FID_BLNG_CLS_CODE: blng,
-            FID_TRGT_CLS_CODE: '111111111', FID_TRGT_EXLS_CLS_CODE: '000000',
-            FID_INPUT_PRICE_1: '', FID_INPUT_PRICE_2: '', FID_VOL_CNT: '', FID_INPUT_DATE_1: '' });
+          { FID_COND_MRKT_DIV_CODE: 'V', FID_COND_SCR_DIV_CODE: '16449',
+            FID_INPUT_ISCD: '0001', FID_DIV_CLS_CODE: '0',
+            FID_RANK_SORT_CLS_CODE: String(rankSort), FID_ETC_CLS_CODE: String(etcCls) });
         return (r?.output||[]).slice(0,5).map(s => ({
           name: s.hts_kor_isnm, code: s.mksc_shrn_iscd,
           chg: parseFloat(s.prdy_ctrt||0), amt: parseInt(s.ntby_qty||s.frgn_ntby_qty||0)
         }));
-      } catch(e) { log(`  ⚠️ 랭킹(${blng}) 실패: ${e.message}`); return null; }
+      } catch(e) { log(`  ⚠️ 랭킹(${etcCls}/${rankSort}) 실패: ${e.message}`); return null; }
     };
 
-    const [fB,fS,iB,iS,dB,dS] = await Promise.all([1,2,3,4,5,6].map(n => fetchRank(String(n))));
+    const [fB, fS, iB, iS] = await Promise.all([
+      fetchRank(1, 0), fetchRank(1, 1), fetchRank(2, 0), fetchRank(2, 1)
+    ]);
+    const dB = null; const dS = null;
     const result = {
       volume:     volume.length ? volume  : prevStocks.volume,
       foreignBuy: fB?.length   ? fB      : prevStocks.foreignBuy,
