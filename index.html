@@ -419,7 +419,7 @@
     <div class="footer">CoinGecko · 서버 수집 기준</div>
   </div>
 
-<div class="tab-content" id="tab-5">
+  <div class="tab-content" id="tab-5">
     <div class="section-label">국내 데이터 (Korea)</div>
     <div class="card">
       <div class="supply-row"><span class="supply-name">시장 지수</span><span class="supply-val loading" id="time-krIndex" style="font-weight:400; font-size:12px;">-</span></div>
@@ -440,42 +440,36 @@
 
     <div class="section-label section-gap">업데이트 내역 (Release Notes)</div>
     <div class="card" style="padding: 14px 16px;">
-      
       <div class="update-item">
         <div class="update-header">
-          <span class="update-ver">v5.2</span>
-          <span class="update-date">2026.04.24 11:20 배포</span>
+          <span class="update-ver">v5.6</span>
+          <span class="update-date">2026.04.24 15:20 배포</span>
         </div>
         <ul class="update-desc">
-          <li>데이터 항목별(9개) 개별 타임스탬프 적용 및 UI 분리</li>
-          <li>수급 데이터 수집 API 교체 (금액 단위 환산 적용)</li>
-          <li>가상화폐 수집 로직 서버 사이드로 이관 (CORS 에러 해결)</li>
-          <li>종목 순위 및 거래대금 로직 원본 복구 및 안정화</li>
+          <li><b>종목 순위 ETF 필터링</b>: KODEX, 인버스 등 파생상품을 거래대금 상위에서 제외</li>
+          <li><b>개인 수급 추가</b>: 외국인/기관 외에 개인 순매수/순매도 TOP 5 데이터 연동</li>
+          <li><b>섹터 툴팁(reps) 구현</b>: 섹터명 옆 (?) 아이콘 오버 시 대표 주도주 정보 노출</li>
+          <li>금액 단위 정규화 및 UI-서버 데이터 정합성 강화</li>
         </ul>
       </div>
-
       <div class="update-divider"></div>
-
       <div class="update-item">
         <div class="update-header">
-          <span class="update-ver">v5.1</span>
-          <span class="update-date">2026.04.23 18:00 배포</span>
+          <span class="update-ver">v5.5</span>
+          <span class="update-date">2026.04.24 14:30 배포</span>
         </div>
         <ul class="update-desc">
-          <li>API 호출 간격 1000ms 조정 (429 요청 제한 방어)</li>
-          <li>Yahoo Finance 비유동성 종목(KORZ) 파싱 에러 방어 로직 추가</li>
-          <li>모바일 스와이프 탭 전환 기능 추가</li>
-          <li>시스템 모니터링(패치) 탭 최초 신설</li>
+          <li>국내/미국 섹터 등락률 실시간 정렬 기능 및 휴장일 대비 데이터 유지 로직 추가</li>
         </ul>
       </div>
-
     </div>
   </div>
+</div>
 
 <script>
 const DAYS=['일','월','화','수','목','금','토'];
 
-// 다크모드 설정: 로컬 스토리지에 'light'가 명시적으로 없으면 기본값 다크모드 적용
+// 다크모드 설정
 let isDark = localStorage.getItem('ml_theme') !== 'light'; 
 if(isDark) {
     document.body.classList.add('dark');
@@ -485,8 +479,7 @@ if(isDark) {
     document.getElementById('toggle-btn').textContent = '🌙';
 }
 
-let usdkrwRate=1400; // 환율 기준값 (환율 로드 후 업데이트)
-
+let usdkrwRate=1400; 
 let currentTabIndex = 0;
 const totalTabs = 6;
 
@@ -503,10 +496,7 @@ function switchTab(idx, btn){
 // 스와이프 기능
 let touchStartX = 0;
 const appEl = document.getElementById('app');
-appEl.addEventListener('touchstart', e => { 
-    touchStartX = e.changedTouches[0].screenX; 
-}, {passive: true});
-
+appEl.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; }, {passive: true});
 appEl.addEventListener('touchend', e => {
   let touchEndX = e.changedTouches[0].screenX;
   let diff = touchStartX - touchEndX;
@@ -525,36 +515,31 @@ function toggleMode(){
 }
 
 function toggleTip(id, event){
-  if(event) event.stopPropagation(); // 이벤트 버블링 방지
+  if(event) event.stopPropagation();
   document.querySelectorAll('.tooltip').forEach(t=>{if(t.id!==id)t.classList.remove('show');});
   document.getElementById(id).classList.toggle('show');
 }
 
-// 툴팁 외부 클릭 시 닫기
 document.addEventListener('click', (e) => {
   if(!e.target.closest('.info-btn') && !e.target.closest('.tooltip')) {
     document.querySelectorAll('.tooltip.show').forEach(t => t.classList.remove('show'));
   }
 });
 
-function fmtDate(d){
-  if(!d) return '-';
-  const dt = new Date(d);
-  if(isNaN(dt)) return d;
-  return `${dt.getMonth()+1}/${dt.getDate()}`;
+function fmtDate(d){ if(!d) return '-'; const dt = new Date(d); return isNaN(dt) ? d : `${dt.getMonth()+1}/${dt.getDate()}`; }
+function fmtDow(d){ if(!d) return '-'; const dt = new Date(d); return isNaN(dt) ? '' : DAYS[dt.getDay()]; }
+function fmtKstTime(){ const now=new Date(); const kst=new Date(now.toLocaleString('en-US',{timeZone:'Asia/Seoul'})); return `${kst.getMonth()+1}월 ${kst.getDate()}일 (${DAYS[kst.getDay()]}) ${String(kst.getHours()).padStart(2,'0')}:${String(kst.getMinutes()).padStart(2,'0')} 기준`; }
+
+// 단위 환산 핵심 함수: 서버(v5.6)가 이미 '억'을 주므로 그대로 출력
+function fmtVol(bil){
+  const abs=Math.abs(bil);
+  if(abs>=10000){
+    const jo=Math.floor(abs/10000); const rem=Math.round(abs%10000);
+    return(bil<0?'-':'')+jo+'조 '+rem.toLocaleString()+'억';
+  }
+  return(bil<0?'-':'')+abs.toLocaleString()+'억';
 }
-function fmtDow(d){
-  if(!d) return '-';
-  const dt = new Date(d);
-  if(isNaN(dt)) return '';
-  return DAYS[dt.getDay()];
-}
-function fmtKstTime(){
-  const now=new Date();
-  const kst=new Date(now.toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
-  return `${kst.getMonth()+1}월 ${kst.getDate()}일 (${DAYS[kst.getDay()]}) ${String(kst.getHours()).padStart(2,'0')}:${String(kst.getMinutes()).padStart(2,'0')} 기준`;
-}
-function fmtVol(bil){const abs=Math.abs(bil);if(abs>=10000){const jo=Math.floor(abs/10000);const rem=Math.round(abs%10000);return(bil<0?'-':'')+jo+'조 '+rem.toLocaleString()+'억';}return(bil<0?'-':'')+abs.toLocaleString()+'억';}
+
 function toKrw(usd){return usd ? Math.round(usd*usdkrwRate).toLocaleString('ko')+'원' : '-';}
 
 function setVal(id,value,change){
@@ -566,7 +551,7 @@ function setVal(id,value,change){
 function renderWeek(weekId,todDateId,todValId,todChgId,hist,todVal,todChg){
   const cols=document.getElementById(weekId).querySelectorAll('.week-day');
   hist.forEach((item,i)=>{
-    const col=cols[i];if(!col)return;
+    const col=cols[i]; if(!col)return;
     const isUp=parseFloat(item.change||item.chg||0)>=0;
     col.querySelector('.week-day-date').textContent=fmtDate(item.date);
     col.querySelector('.week-day-dow').textContent=fmtDow(item.date);
@@ -583,7 +568,7 @@ function renderWeek(weekId,todDateId,todValId,todChgId,hist,todVal,todChg){
 
 function setSupplyVal(id,val){
   const el=document.getElementById(id);if(!el)return 0;
-  const bil=Math.round((parseInt(val)||0)/1000000);
+  const bil=parseInt(val)||0; // v5.6 서버 데이터 직접 수용
   const isUp=bil>=0;
   el.textContent=(isUp?'▲ +':'▼ ')+fmtVol(Math.abs(bil));
   el.className='supply-val '+(isUp?'up':'down');
@@ -607,7 +592,7 @@ function renderSupplySummary(f,inst,ind){
 function renderSupplyWeek(hist,todTotal){
   const cols=document.getElementById('supply-week').querySelectorAll('.week-day');
   hist.forEach((item,i)=>{
-    const col=cols[i];if(!col)return;
+    const col=cols[i]; if(!col)return;
     const isUp=item.total>=0;const isNeu=Math.abs(item.total)<500;
     col.querySelector('.week-day-date').textContent=fmtDate(item.date);
     col.querySelector('.week-day-dow').textContent=fmtDow(item.date);
@@ -625,21 +610,30 @@ function renderSupplyWeek(hist,todTotal){
   else{tte.textContent='매도';tte.className='stoday-tag stag-sell';tve.textContent='-'+fmtVol(Math.abs(todTotal));tve.className='stoday-val down';}
 }
 
+// 섹터 렌더링 수정: 툴팁(reps) 연동 및 정렬
 function renderSectorList(sectors){
   const sorted=[...sectors].sort((a,b)=>b.chg-a.chg);
   document.getElementById('sector-list').innerHTML=sorted.map((s,i)=>{
-    const isUp=s.chg>0;const isNeu=s.chg===0;
+    const isUp=s.chg>0; const isNeu=s.chg===0;
     const cc=isNeu?'neutral':isUp?'up':'down';
     const cs=isNeu?'0.00%':(isUp?'▲ +':'▼ ')+Math.abs(s.chg).toFixed(2)+'%';
-    const tip=s.tip?`<button class="info-btn" onclick="toggleTip('t-kr-${i}', event)">?</button><div class="tooltip" id="t-kr-${i}" style="z-index:20;">${s.tip}</div>`:'';
-    return`<div class="sector-row" style="position:relative;"><span class="sector-rank">${i+1}</span><span class="sector-name" style="display:flex;align-items:center;gap:4px;">${s.name}${tip}</span><span class="sector-chg ${cc}">${cs}</span><span class="sector-vol">${fmtVol(s.vol)}</span></div>`;
+    return `<div class="sector-row" title="${s.reps || ''}" style="position:relative;">
+              <span class="sector-rank">${i+1}</span>
+              <span class="sector-name" style="display:flex;align-items:center;gap:4px;">
+                ${s.name} <span style="cursor:help; color:var(--text3); font-size:10px;">(?)</span>
+              </span>
+              <span class="sector-chg ${cc}">${cs}</span>
+              <span class="sector-vol">${fmtVol(s.vol)}</span>
+            </div>`;
   }).join('');
 }
 
 function renderStockTable(tbodyId,stocks){
+  if(!stocks) return;
   document.getElementById(tbodyId).innerHTML=stocks.map((s,i)=>{
-    const cc=s.chg>=0?'up':'down';const cs=(s.chg>=0?'▲ +':'▼ ')+Math.abs(s.chg).toFixed(2)+'%';
-    const ac=s.amt>=0?'up':'down';const as=(s.amt>=0?'+':'-')+fmtVol(Math.abs(s.amt));
+    const cc=s.chg>=0?'up':'down'; const cs=(s.chg>=0?'▲ +':'▼ ')+Math.abs(s.chg).toFixed(2)+'%';
+    const amt = parseInt(s.amt)||0;
+    const ac=amt>=0?'up':'down'; const as=(amt>=0?'+':'-')+fmtVol(Math.abs(amt));
     return`<tr><td><span class="stock-rank">${i+1}</span><span class="stock-name">${s.name}</span><span class="stock-code">(${s.code})</span></td><td class="${cc}">${cs}</td><td class="${ac}">${as}</td></tr>`;
   }).join('');
 }
@@ -648,29 +642,16 @@ function renderUsSectors(sectors){
   if(!sectors||!sectors.length)return;
   const idMap={'IT':'it','커뮤니케이션':'com','임의소비재':'disc','금융':'fin','헬스케어':'hc','산업재':'ind','필수소비재':'stap','부동산':'re','유틸리티':'util','소재':'mat','에너지':'en'};
   const sorted=[...sectors].sort((a,b)=>b.chg-a.chg);
-  const rows=document.querySelectorAll('#us-sector-list .sector-row');
+  const container=document.getElementById('us-sector-list');
   sorted.forEach((s,i)=>{
-    const key=idMap[s.name];if(!key)return;
-    const el=document.getElementById('us-chg-'+key);
-    if(!el)return;
-    const isUp=s.chg>0;const isNeu=s.chg===0;
+    const key=idMap[s.name]; if(!key)return;
+    const el=document.getElementById('us-chg-'+key); if(!el)return;
+    const isUp=s.chg>0; const isNeu=s.chg===0;
     el.textContent=isNeu?'0.00%':(isUp?'▲ +':'▼ ')+Math.abs(s.chg).toFixed(2)+'%';
     el.className='sector-chg '+(isNeu?'neutral':isUp?'up':'down');
     const row=el.closest('.sector-row');
-    if(row){const rankEl=row.querySelector('.sector-rank');if(rankEl)rankEl.textContent=i+1;}
-  });
-  const container=document.getElementById('us-sector-list');
-  const allRows=Array.from(container.querySelectorAll('.sector-row'));
-  const tooltips=Array.from(container.querySelectorAll('.tooltip'));
-  sorted.forEach((s,i)=>{
-    const key=idMap[s.name];if(!key)return;
-    const chgEl=document.getElementById('us-chg-'+key);
-    if(!chgEl)return;
-    const row=chgEl.closest('.sector-row');
-    const tipId='t-us-'+key;
-    const tip=document.getElementById(tipId);
-    if(row)container.appendChild(row);
-    if(tip)container.appendChild(tip);
+    if(row){ row.querySelector('.sector-rank').textContent=i+1; container.appendChild(row); }
+    const tip=document.getElementById('t-us-'+key); if(tip) container.appendChild(tip);
   });
 }
 
@@ -702,27 +683,19 @@ function setKoreaEtf(id,value,change){
   if(ke)ke.textContent='≈ '+toKrw(parseFloat(value));
 }
 
-function setEtfKrw(id,value){
-  const ke=document.getElementById(id+'-krw');
-  if(ke)ke.textContent='≈ '+toKrw(parseFloat(value));
-}
+function setEtfKrw(id,value){ const ke=document.getElementById(id+'-krw'); if(ke)ke.textContent='≈ '+toKrw(parseFloat(value)); }
 
 function calcFedDday(){
-  const nextFomc=new Date('2025-05-07');
-  const now=new Date();
-  const diff=Math.ceil((nextFomc-now)/(1000*60*60*24));
-  const el=document.getElementById('fed-dday');
-  if(el)el.textContent=diff>0?'D-'+diff:diff===0?'D-Day':'D+'+Math.abs(diff);
+  const nextFomc=new Date('2025-05-07'); const now=new Date(); const diff=Math.ceil((nextFomc-now)/(1000*60*60*24));
+  const el=document.getElementById('fed-dday'); if(el)el.textContent=diff>0?'D-'+diff:diff===0?'D-Day':'D+'+Math.abs(diff);
 }
 
 function fearLabel(s){if(s<=24)return'극단적 공포';if(s<=44)return'공포';if(s<=55)return'중립';if(s<=75)return'탐욕';return'극단적 탐욕';}
 
 function updateVisitors(){
-  const today=new Date().toDateString();
-  let data=JSON.parse(localStorage.getItem('ml_visitors')||'{}');
+  const today=new Date().toDateString(); let data=JSON.parse(localStorage.getItem('ml_visitors')||'{}');
   if(data.date!==today)data={date:today,today:0,total:data.total||0};
-  data.today+=1;data.total+=1;
-  localStorage.setItem('ml_visitors',JSON.stringify(data));
+  data.today+=1;data.total+=1; localStorage.setItem('ml_visitors',JSON.stringify(data));
   document.getElementById('today-visitors').textContent=data.today.toLocaleString();
   document.getElementById('total-visitors').textContent=data.total.toLocaleString();
   document.getElementById('live-visitors').textContent=Math.floor(Math.random()*5)+1;
@@ -747,19 +720,9 @@ async function loadAll(){
     const pe=document.getElementById('prog-date');if(pe)pe.textContent=supplyTime;
     setTimeLabel('sector-time',supplyTime);
 
-    // 코스피/코스닥
-    if(d.kospi?.value){
-      const hist=d.kospi.history||[];
-      if(hist.length>=4)renderWeek('kospi-week','kospi-td','kospi-v','kospi-c',hist.slice(0,4),d.kospi.value,d.kospi.change);
-      else{const el=document.getElementById('kospi-v');if(el){el.textContent=parseFloat(d.kospi.value).toLocaleString('ko',{maximumFractionDigits:1});el.classList.remove('loading');}}
-    }
-    if(d.kosdaq?.value){
-      const hist=d.kosdaq.history||[];
-      if(hist.length>=4)renderWeek('kosdaq-week','kosdaq-td','kosdaq-v','kosdaq-c',hist.slice(0,4),d.kosdaq.value,d.kosdaq.change);
-      else{const el=document.getElementById('kosdaq-v');if(el){el.textContent=parseFloat(d.kosdaq.value).toLocaleString('ko',{maximumFractionDigits:1});el.classList.remove('loading');}}
-    }
+    if(d.kospi?.value) renderWeek('kospi-week','kospi-td','kospi-v','kospi-c',(d.kospi.history||[]).slice(0,4),d.kospi.value,d.kospi.change);
+    if(d.kosdaq?.value) renderWeek('kosdaq-week','kosdaq-td','kosdaq-v','kosdaq-c',(d.kosdaq.history||[]).slice(0,4),d.kosdaq.value,d.kosdaq.change);
 
-    // 수급
     if(d.supply){
       const f=setSupplyVal('foreign',d.supply.foreign)||0;
       const inst=setSupplyVal('institution',d.supply.institution)||0;
@@ -768,34 +731,24 @@ async function loadAll(){
       renderSupplyWeek((d.supply.history||[]),f+inst+ind);
     }
 
-    // 프로그램 매매
     if(d.program){
-      const setP=(id,val)=>{const el=document.getElementById(id);if(!el)return;const bil=Math.round((parseInt(val)||0)/1000000);const isUp=bil>=0;el.textContent=(isUp?'▲ +':'▼ ')+fmtVol(Math.abs(bil));el.className='prog-val '+(isUp?'up':'down');};
-      setP('prog-buy-arb',d.program.buyArb);setP('prog-sell-arb',d.program.sellArb);
-      setP('prog-buy-non',d.program.buyNon);setP('prog-sell-non',d.program.sellNon);
+      const setP=(id,val)=>{const el=document.getElementById(id);if(!el)return; const bil=parseInt(val)||0; const isUp=bil>=0; el.textContent=(isUp?'▲ +':'▼ ')+fmtVol(Math.abs(bil)); el.className='prog-val '+(isUp?'up':'down');};
+      setP('prog-buy-arb',d.program.buyArb);setP('prog-sell-arb',d.program.sellArb);setP('prog-buy-non',d.program.buyNon);setP('prog-sell-non',d.program.sellNon);
     }
 
-    // 마켓 뎁스
     if(d.depth){
       const{up,neu,dn}=d.depth;const total=up+neu+dn||1;
-      document.getElementById('depth-up-n').textContent=up;
-      document.getElementById('depth-dn-n').textContent=dn;
-      document.getElementById('depth-neu-n').textContent='보합 '+neu;
-      document.getElementById('depth-up-bar').style.width=(up/total*100).toFixed(1)+'%';
-      document.getElementById('depth-neu-bar').style.width=(neu/total*100).toFixed(1)+'%';
-      document.getElementById('depth-dn-bar').style.width=(dn/total*100).toFixed(1)+'%';
+      document.getElementById('depth-up-n').textContent=up; document.getElementById('depth-dn-n').textContent=dn; document.getElementById('depth-neu-n').textContent='보합 '+neu;
+      document.getElementById('depth-up-bar').style.width=(up/total*100).toFixed(1)+'%'; document.getElementById('depth-neu-bar').style.width=(neu/total*100).toFixed(1)+'%'; document.getElementById('depth-dn-bar').style.width=(dn/total*100).toFixed(1)+'%';
     }
 
-    // ETF
     if(d.etf){
       const em={kodex200:'kodex200',kodexkosdaq:'kodexkosdaq',kodexlev:'kodexlev',kodexinv:'kodexinv',kodexinv2:'kodexinv2',kodexsp:'kodexsp'};
       Object.entries(em).forEach(([k,id])=>{if(d.etf[k])setVal(id,parseFloat(d.etf[k].value).toLocaleString('ko'),d.etf[k].change);});
     }
 
-    // KR 섹터
-    if(d.sectors)renderSectorList(d.sectors);
+    if(d.sectors) renderSectorList(d.sectors);
 
-    // KR 종목
     if(d.stocks){
       if(d.stocks.volume)renderStockTable('stock-volume',d.stocks.volume);
       if(d.stocks.foreignBuy)renderStockTable('foreign-buy',d.stocks.foreignBuy);
@@ -806,136 +759,58 @@ async function loadAll(){
       if(d.stocks.indvSell)renderStockTable('indv-sell',d.stocks.indvSell);
     }
 
-    // 미국 지수
     if(d.us){
       const usTime=d.updatedAt||'-';
-      setTimeLabel('us-index-time',usTime);setTimeLabel('us-etf-time',usTime);
-      setTimeLabel('us-sector-time',usTime);setTimeLabel('m7-time',usTime);
-      setTimeLabel('commodity-time',usTime);
-
+      ['us-index-time','us-etf-time','us-sector-time','m7-time','commodity-time'].forEach(id=>setTimeLabel(id,usTime));
       if(d.us.sp500)setVal('sp500',parseFloat(d.us.sp500.value).toLocaleString('en',{maximumFractionDigits:0}),d.us.sp500.change);
       if(d.us.nasdaq)setVal('nasdaq',parseFloat(d.us.nasdaq.value).toLocaleString('en',{maximumFractionDigits:0}),d.us.nasdaq.change);
       if(d.us.dow)setVal('dow',parseFloat(d.us.dow.value).toLocaleString('en',{maximumFractionDigits:0}),d.us.dow.change);
       if(d.us.vix){
-        const ve=document.getElementById('vix');const ce=document.getElementById('vix-chg');
-        if(ve){ve.textContent=parseFloat(d.us.vix.value).toFixed(1);ve.classList.remove('loading');ve.style.color=d.us.vix.value>=30?'#ff453a':d.us.vix.value>=20?'#ff9f0a':'#30d158';}
-        if(ce){const isUp=d.us.vix.change>=0;ce.textContent=(isUp?'▲ +':'▼ ')+Math.abs(parseFloat(d.us.vix.change)).toFixed(2)+'%';ce.className='card-change '+(isUp?'down':'up');}
+        const ve=document.getElementById('vix'); if(ve){ve.textContent=parseFloat(d.us.vix.value).toFixed(1); ve.style.color=d.us.vix.value>=30?'#ff453a':d.us.vix.value>=20?'#ff9f0a':'#30d158';}
+        const ce=document.getElementById('vix-chg'); if(ce){const isUp=d.us.vix.change>=0;ce.textContent=(isUp?'▲ +':'▼ ')+Math.abs(parseFloat(d.us.vix.change)).toFixed(2)+'%';ce.className='card-change '+(isUp?'down':'up');}
       }
       if(d.us.tnx)setVal('tnx',parseFloat(d.us.tnx.value).toFixed(3)+'%',d.us.tnx.change);
-      if(d.us.dxy){
-        setVal('dxy',parseFloat(d.us.dxy.value).toFixed(2),d.us.dxy.change);
-        setVal('dxy2',parseFloat(d.us.dxy.value).toFixed(2),d.us.dxy.change);
-      }
-      if(d.us.spy){setVal('spy','$'+parseFloat(d.us.spy.value).toFixed(2),d.us.spy.change);setEtfKrw('spy',d.us.spy.value);}
-      if(d.us.qqq){setVal('qqq','$'+parseFloat(d.us.qqq.value).toFixed(2),d.us.qqq.change);setEtfKrw('qqq',d.us.qqq.value);}
-      if(d.us.tqqq){setVal('tqqq','$'+parseFloat(d.us.tqqq.value).toFixed(2),d.us.tqqq.change);setEtfKrw('tqqq',d.us.tqqq.value);}
-      if(d.us.sqqq){setVal('sqqq','$'+parseFloat(d.us.sqqq.value).toFixed(2),d.us.sqqq.change);setEtfKrw('sqqq',d.us.sqqq.value);}
-      if(d.updatedAt){const el=document.getElementById('us-footer');if(el)el.textContent=d.updatedAt;}
+      if(d.us.dxy){ setVal('dxy',parseFloat(d.us.dxy.value).toFixed(2),d.us.dxy.change); setVal('dxy2',parseFloat(d.us.dxy.value).toFixed(2),d.us.dxy.change); }
+      ['spy','qqq','tqqq','sqqq'].forEach(k=>{if(d.us[k]){setVal(k,'$'+parseFloat(d.us[k].value).toFixed(2),d.us[k].change);setEtfKrw(k,d.us[k].value);}});
     }
 
-    // M7
-    if(d.m7){
-      ['aapl','msft','nvda','amzn','googl','meta','tsla'].forEach(k=>{if(d.m7[k])setM7(k,d.m7[k].value,d.m7[k].change);});
-    }
-
-    // US섹터 (등락률순 정렬)
-    if(d.usSectors)renderUsSectors(d.usSectors);
-
-    // 한국관련 미국ETF
-    if(d.koreaEtf){
-      if(d.koreaEtf.ewy)setKoreaEtf('ewy',d.koreaEtf.ewy.value,d.koreaEtf.ewy.change);
-      if(d.koreaEtf.koru)setKoreaEtf('koru',d.koreaEtf.koru.value,d.koreaEtf.koru.change);
-      if(d.koreaEtf.korz)setKoreaEtf('korz',d.koreaEtf.korz.value,d.koreaEtf.korz.change);
-    }
-
-    // 원자재
+    if(d.m7) ['aapl','msft','nvda','amzn','googl','meta','tsla'].forEach(k=>{if(d.m7[k])setM7(k,d.m7[k].value,d.m7[k].change);});
+    if(d.usSectors) renderUsSectors(d.usSectors);
+    if(d.koreaEtf) ['ewy','koru','korz'].forEach(k=>{if(d.koreaEtf[k])setKoreaEtf(k,d.koreaEtf[k].value,d.koreaEtf[k].change);});
     if(d.commodities){
       if(d.commodities.wti)setAsset('wti',d.commodities.wti.value,d.commodities.wti.change,v=>'$'+parseFloat(v).toFixed(2));
       if(d.commodities.gold)setAsset('gold',d.commodities.gold.value,d.commodities.gold.change,v=>'$'+parseFloat(v).toLocaleString('en',{maximumFractionDigits:0}));
       if(d.commodities.copper)setAsset('copper',d.commodities.copper.value,d.commodities.copper.change,v=>'$'+parseFloat(v).toFixed(3));
     }
-
-    // 암호화폐 (서버 데이터 활용)
     if(d.crypto) {
-      const t = fmtKstTime();
-      setTimeLabel('crypto-time', t);
+      setTimeLabel('crypto-time', fmtKstTime());
       if(d.crypto.bitcoin) setCrypto('btc', d.crypto.bitcoin.usd, d.crypto.bitcoin.usd_24h_change);
       if(d.crypto.ethereum) setCrypto('eth', d.crypto.ethereum.usd, d.crypto.ethereum.usd_24h_change);
     }
-
-// 시스템 업데이트 시간 로깅
-    if(d.updateTimes) {
-      const setT = (id, val) => {
-        const el = document.getElementById('time-' + id);
-        if(el) {
-          el.textContent = val || '-';
-          el.classList.remove('loading');
-          // 업데이트가 안 된 항목은 붉은색으로 시각적 구분
-          el.style.color = val === '-' ? 'var(--down)' : 'var(--text2)';
-        }
-      };
-      setT('krIndex', d.updateTimes.krIndex);
-      setT('krSupply', d.updateTimes.krSupply);
-      setT('krProgram', d.updateTimes.krProgram);
-      setT('krDepth', d.updateTimes.krDepth);
-      setT('krEtf', d.updateTimes.krEtf);
-      setT('krSector', d.updateTimes.krSector);
-      setT('krStock', d.updateTimes.krStock);
-      setT('usData', d.updateTimes.usData);
-      setT('crypto', d.updateTimes.crypto);
-    }
+    if(d.updateTimes) ['krIndex','krSupply','krProgram','krDepth','krEtf','krSector','krStock','usData','crypto'].forEach(id=>{
+      const el=document.getElementById('time-'+id); if(el){el.textContent=d.updateTimes[id]||'-'; el.style.color=d.updateTimes[id]==='-'?'var(--down)':'var(--text2)'; el.classList.remove('loading');}
+    });
   }
 
-  // 환율 (실시간)
+  // 환율 및 심리 (실시간)
   try{
-    const res=await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-    const ex=await res.json();
-    const r=ex.rates;
-    usdkrwRate=r.KRW; // 전역 환율 업데이트
-    const t=fmtKstTime();
-    setTimeLabel('ex-time',t);
-    const setEx=(id,val)=>{
-      const ve=document.getElementById(id);const ce=document.getElementById(id+'-chg');
-      if(ve){ve.textContent=val.toFixed(2)+'원';ve.classList.remove('loading');}
-      if(ce)ce.textContent=t;
-    };
-    setEx('usdkrw',r.KRW);
-    setEx('jpykrw',(r.KRW/r.JPY)*100);
-    setEx('eurkrw',r.KRW/r.EUR);
-    setEx('cnykrw',r.KRW/r.CNY);
-    const ve2=document.getElementById('usdkrw2');if(ve2){ve2.textContent=r.KRW.toFixed(2)+'원';ve2.classList.remove('loading');}
-    const ce2=document.getElementById('usdkrw2-chg');if(ce2)ce2.textContent=t;
-    // 환율 로드 후 원화 병기 업데이트
-    if(d?.m7){['aapl','msft','nvda','amzn','googl','meta','tsla'].forEach(k=>{if(d.m7[k]){const ke=document.getElementById('m7-'+k+'-krw');if(ke)ke.textContent='≈ '+toKrw(parseFloat(d.m7[k].value));}});}
-    if(d?.us){
-      ['spy','qqq','tqqq','sqqq'].forEach(k=>{if(d.us[k]){const ke=document.getElementById(k+'-krw');if(ke)ke.textContent='≈ '+toKrw(parseFloat(d.us[k].value));}});
-    }
-    if(d?.koreaEtf){
-      ['ewy','koru','korz'].forEach(k=>{if(d.koreaEtf[k]){const ke=document.getElementById(k+'-krw');if(ke)ke.textContent='≈ '+toKrw(parseFloat(d.koreaEtf[k].value));}});
-    }
-    if(d?.commodities){
-      ['wti','gold','copper'].forEach(k=>{if(d.commodities[k]){const ke=document.getElementById(k+'-krw');if(ke)ke.textContent='≈ '+toKrw(parseFloat(d.commodities[k].value));}});
-    }
+    const res=await fetch('https://api.exchangerate-api.com/v4/latest/USD'); const ex=await res.json(); usdkrwRate=ex.rates.KRW; const t=fmtKstTime(); setTimeLabel('ex-time',t);
+    const setEx=(id,val)=>{ const ve=document.getElementById(id); if(ve){ve.textContent=val.toFixed(2)+'원';ve.classList.remove('loading');} const ce=document.getElementById(id+'-chg'); if(ce)ce.textContent=t; };
+    setEx('usdkrw',usdkrwRate); setEx('jpykrw',(usdkrwRate/ex.rates.JPY)*100); setEx('eurkrw',usdkrwRate/ex.rates.EUR); setEx('cnykrw',usdkrwRate/ex.rates.CNY);
+    const ve2=document.getElementById('usdkrw2'); if(ve2){ve2.textContent=usdkrwRate.toFixed(2)+'원';ve2.classList.remove('loading');}
   }catch(e){}
 
-  // 공포탐욕 (실시간)
   try{
-    const res=await fetch('https://production.dataviz.cnn.io/index/fearandgreed/graphdata');
-    const fg=await res.json();
-    const score=Math.round(fg.fear_and_greed.score);
-    const fe=document.getElementById('fear-val');
-    fe.textContent=score+' '+fearLabel(score);fe.classList.remove('loading');
-    fe.style.color=score<=44?'#ff453a':score<=55?'#ff9f0a':'#30d158';
+    const res=await fetch('https://production.dataviz.cnn.io/index/fearandgreed/graphdata'); const fg=await res.json(); const score=Math.round(fg.fear_and_greed.score);
+    const fe=document.getElementById('fear-val'); fe.textContent=score+' '+fearLabel(score); fe.classList.remove('loading'); fe.style.color=score<=44?'#ff453a':score<=55?'#ff9f0a':'#30d158';
     setTimeLabel('us-fear-time',fmtKstTime());
     const prev=fg.fear_and_greed_historical?.previous_week?.score;
-    if(prev){const diff=score-Math.round(prev);const fp=document.getElementById('fear-prev');fp.textContent=(diff>=0?'▲ +':'▼ ')+Math.abs(diff)+'p';fp.className=diff>=0?'up':'down';}
+    if(prev){const diff=score-Math.round(prev); const fp=document.getElementById('fear-prev'); fp.textContent=(diff>=0?'▲ +':'▼ ')+Math.abs(diff)+'p'; fp.className=diff>=0?'up':'down';}
   }catch(e){}
 }
 
-updateVisitors();
-loadAll();
-setInterval(loadAll,300000);
-setInterval(updateVisitors,60000);
+updateVisitors(); loadAll();
+setInterval(loadAll,300000); setInterval(updateVisitors,60000);
 </script>
 </body>
 </html>
