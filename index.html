@@ -410,16 +410,24 @@
     <div class="footer">CoinGecko · 서버 수집 기준</div>
   </div>
 
-  <div class="tab-content" id="tab-5">
-    <div class="section-label">시스템 상태 (System Log)</div>
+ <div class="tab-content" id="tab-5">
+    <div class="section-label">국내 데이터 (Korea)</div>
     <div class="card">
-      <div class="supply-row"><span class="supply-name">최종 패치 시간</span><span class="supply-val" id="sys-time" style="font-weight:400; font-size:11px;">-</span></div>
-      <div class="supply-row"><span class="supply-name">한국투자증권 (KIS) 연결</span><span class="supply-val loading" id="sys-kis">-</span></div>
-      <div class="supply-row"><span class="supply-name">국내 데이터 수집</span><span class="supply-val loading" id="sys-kr">-</span></div>
-      <div class="supply-row"><span class="supply-name">해외 데이터 수집</span><span class="supply-val loading" id="sys-us">-</span></div>
-      <div class="supply-row"><span class="supply-name">암호화폐 수집</span><span class="supply-val loading" id="sys-crypto">-</span></div>
+      <div class="supply-row"><span class="supply-name">시장 지수</span><span class="supply-val loading" id="time-krIndex" style="font-weight:400; font-size:12px;">-</span></div>
+      <div class="supply-row"><span class="supply-name">수급 동향</span><span class="supply-val loading" id="time-krSupply" style="font-weight:400; font-size:12px;">-</span></div>
+      <div class="supply-row"><span class="supply-name">프로그램 매매</span><span class="supply-val loading" id="time-krProgram" style="font-weight:400; font-size:12px;">-</span></div>
+      <div class="supply-row"><span class="supply-name">마켓 뎁스</span><span class="supply-val loading" id="time-krDepth" style="font-weight:400; font-size:12px;">-</span></div>
+      <div class="supply-row"><span class="supply-name">한국 ETF</span><span class="supply-val loading" id="time-krEtf" style="font-weight:400; font-size:12px;">-</span></div>
+      <div class="supply-row"><span class="supply-name">KR 섹터</span><span class="supply-val loading" id="time-krSector" style="font-weight:400; font-size:12px;">-</span></div>
+      <div class="supply-row"><span class="supply-name">종목 순위</span><span class="supply-val loading" id="time-krStock" style="font-weight:400; font-size:12px;">-</span></div>
     </div>
-    <div class="footer">서버 스케줄러 자동 패치 기준</div>
+
+    <div class="section-label section-gap">해외 및 기타 데이터 (Global & Asset)</div>
+    <div class="card">
+      <div class="supply-row"><span class="supply-name">미국 시장 전체</span><span class="supply-val loading" id="time-usData" style="font-weight:400; font-size:12px;">-</span></div>
+      <div class="supply-row"><span class="supply-name">가상화폐</span><span class="supply-val loading" id="time-crypto" style="font-weight:400; font-size:12px;">-</span></div>
+    </div>
+    <div class="footer">각 항목별 최근 수집 성공 시간 표기</div>
   </div>
 
 </div>
@@ -815,20 +823,26 @@ async function loadAll(){
       if(d.crypto.ethereum) setCrypto('eth', d.crypto.ethereum.usd, d.crypto.ethereum.usd_24h_change);
     }
 
-    // 시스템 상태 로깅
-    if(d.systemStatus) {
-      document.getElementById('sys-time').textContent = d.time || '-';
-      const setSys = (id, status) => {
-        const el = document.getElementById(id);
+// 시스템 업데이트 시간 로깅
+    if(d.updateTimes) {
+      const setT = (id, val) => {
+        const el = document.getElementById('time-' + id);
         if(el) {
-          el.textContent = status;
-          el.className = 'supply-val ' + (status === 'OK' ? 'up' : 'down');
+          el.textContent = val || '-';
+          el.classList.remove('loading');
+          // 업데이트가 안 된 항목은 붉은색으로 시각적 구분
+          el.style.color = val === '-' ? 'var(--down)' : 'var(--text2)';
         }
       };
-      setSys('sys-kis', d.systemStatus.kis);
-      setSys('sys-kr', d.systemStatus.kr);
-      setSys('sys-us', d.systemStatus.us);
-      setSys('sys-crypto', d.systemStatus.crypto);
+      setT('krIndex', d.updateTimes.krIndex);
+      setT('krSupply', d.updateTimes.krSupply);
+      setT('krProgram', d.updateTimes.krProgram);
+      setT('krDepth', d.updateTimes.krDepth);
+      setT('krEtf', d.updateTimes.krEtf);
+      setT('krSector', d.updateTimes.krSector);
+      setT('krStock', d.updateTimes.krStock);
+      setT('usData', d.updateTimes.usData);
+      setT('crypto', d.updateTimes.crypto);
     }
   }
 
