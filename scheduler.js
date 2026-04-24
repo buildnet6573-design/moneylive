@@ -8,7 +8,7 @@
  * - 이전 데이터 유지 로직
  * - Yahoo 날짜 한국시간 변환
  */
- 
+
 const fs    = require('fs');
 const path  = require('path');
 const https = require('https');
@@ -313,17 +313,22 @@ async function fetchProgram(token, prev) {
   log('🤖 프로그램 매매 수집 중...');
   try {
     const r = await kisGet(
-      '/uapi/domestic-stock/v1/quotations/inquire-program-trade-by-stock',
-      token, 'FHPPG04650100',
-      { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: '0001',
-        FID_INPUT_DATE_1: getDate(-1) }
+      '/uapi/domestic-stock/v1/quotations/comp-program-trade-daily',
+      token, 'FHPPG04600001',
+      { FID_COND_MRKT_DIV_CODE: 'J', FID_MRKT_CLS_CODE: 'K',
+        FID_INPUT_DATE_1: getDate(-1), FID_INPUT_DATE_2: getDate(0) }
     );
-    const d = r?.output?.[0];
-    if (!d) throw new Error('데이터없음');
+    const rows = r?.output;
+    if (!rows?.length) throw new Error('데이터없음');
+    // 수급 있는 날짜 데이터 찾기
+    const d = rows.find(row =>
+      parseInt(row.arbt_buy_amt||0) !== 0 || parseInt(row.nabt_buy_amt||0) !== 0
+    ) || rows[0];
     if (parseInt(d.arbt_buy_amt||0)===0 && parseInt(d.nabt_buy_amt||0)===0 && prev.program) {
       log('  ⚠️ 프로그램 매매 0 → 이전 데이터 유지');
       return prev.program;
     }
+    log(`  프로그램매매 날짜: ${d.stck_bsop_date}`);
     return { buyArb: d.arbt_buy_amt, sellArb: d.arbt_sel_amt, buyNon: d.nabt_buy_amt, sellNon: d.nabt_sel_amt };
   } catch(e) {
     log(`  ⚠️ 프로그램매매 실패→이전유지: ${e.message}`);
@@ -373,7 +378,7 @@ async function fetchKrEtf(token, prev) {
       if (!o?.stck_prpr) throw new Error('데이터없음');
       etf[key] = { value: o.stck_prpr, change: parseFloat(o.prdy_ctrt||0) };
     } catch { log(`  ⚠️ ETF ${key} 실패→이전유지`); }
-    await sleep2(150);
+    await sleep2(300);
   }
   log(`  ETF ${Object.keys(etf).length}개 완료`);
   return etf;
@@ -406,7 +411,7 @@ async function fetchKrSectors(token, prev) {
     } catch(e) {
       results.push({ status: 'rejected' });
     }
-    await sleep(200);
+    await sleep(300);
   }
   const succeeded = results.filter(r => r.status==='fulfilled').map(r => r.value);
   if (succeeded.length > 0) { log(`  섹터 ${succeeded.length}개 완료`); return succeeded; }
@@ -549,7 +554,7 @@ async function collect() {
     koreaEtf: {
       ewy:  pick(us.ewy,  prevKrEtf.ewy),
       koru: pick(us.koru, prevKrEtf.koru),
-      korz: pick(us.korz, prevKrEtf.korz)
+      korz: us.korz ? pick(us.korz, prevKrEtf.korz) : (prevKrEtf.korz||null)
     },
     commodities: {
       wti:    pick(us.wti,    prevCom.wti),
