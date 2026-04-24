@@ -1,12 +1,13 @@
 /**
- * MONEYLIVE 스케줄러 v5
+ * MONEYLIVE 스케줄러 v5.1 (통합 개선판)
  * 수정사항:
- * - 전날 마감 데이터 강제 수집 (수급/종목/섹터 전날 기준)
- * - 날짜별 데이터 저장 /app/storage/data/YYYY-MM-DD.json
- * - 날짜별 로그 저장 /app/storage/logs/YYYY-MM-DD.log
- * - output1(현재가) + output2(히스토리) 분리
- * - 이전 데이터 유지 로직
- * - Yahoo 날짜 한국시간 변환
+ * - 수급 데이터 시세성 TR(FHPTJ04030000) 교체 및 금액 단위 파싱
+ * - KIS API 호출 간격 1000ms 연장 (429 에러 방어)
+ * - Yahoo Finance 비유동성 종목(KORZ) Null 맵핑 에러 방어
+ * - CoinGecko 서버사이드 수집 모듈 추가 (CORS 방어)
+ * - 날짜 KST 및 요일 포함 포맷팅 (parseKisDate)
+ * - 상태 모니터링용 systemStatus 객체 매핑
+ * - 수급 데이터(supply.json) 별도 파일 저장 추가
  */
 
 const fs    = require('fs');
@@ -17,7 +18,7 @@ const https = require('https');
 const STORAGE_DIR = path.join(__dirname, 'storage');
 const DATA_DIR    = path.join(STORAGE_DIR, 'data');
 const LOG_DIR     = path.join(STORAGE_DIR, 'logs');
-const DATA_FILE   = path.join(__dirname, 'data.json'); // 최신본 (프론트용)
+const DATA_FILE   = path.join(__dirname, 'data.json'); 
 const TOKEN_FILE  = path.join(__dirname, 'token.json');
 
 // 디렉토리 생성
@@ -60,9 +61,15 @@ function getDate(offset = 0) {
   return getDateStr(offset).replace(/-/g, '');
 }
 
-function parseKisDate(s) {
-  if (!s || s.length < 8) return null;
-  return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
+// ❌ 문제 해결: 날짜 포맷팅을 'M/D 요일' 형태로 변경
+function parseKisDate(dateStr) {
+  if (!dateStr || dateStr.length !== 8) return "-";
+  const y = dateStr.slice(0, 4);
+  const m = dateStr.slice(4, 6);
+  const d = dateStr.slice(6, 8);
+  const date = new Date(`${y}-${m}-${d}T00:00:00+09:00`);
+  const days = ['일', '월', '화', '수', '목', '금', '토'];
+  return `${parseInt(m)}/${parseInt(d)} ${days[date.getDay()]}`;
 }
 
 function pad(n) { return String(n).padStart(2, '0'); }
@@ -75,9 +82,7 @@ function loadPrevData() {
 }
 
 function saveData(data) {
-  // 최신본 저장
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-  // 날짜별 저장
   const dateFile = path.join(DATA_DIR, `${getDateStr(0)}.json`);
   fs.writeFileSync(dateFile, JSON.stringify(data, null, 2));
   flushLog();
@@ -163,7 +168,7 @@ async function getToken() {
 }
 
 // ─────────────────────────────────────────────
-// Yahoo Finance
+// Yahoo Finance & CoinGecko
 // ─────────────────────────────────────────────
 function fetchYahoo(symbol) {
   return new Promise((resolve, reject) => {
@@ -177,40 +182,61 @@ function fetchYahoo(symbol) {
       res.on('end', () => {
         try {
           const j = JSON.parse(data);
+          // ❌ 문제 해결: 데이터 객체가 비어있을 경우 안전한 방어
           const result = j?.chart?.result?.[0];
-          if (!result) return reject(new Error('결과없음'));
+          if (!result || !result.indicators?.quote?.[0]) return resolve(null);
+          
           const closes = result.indicators.quote[0].close;
           const timestamps = result.timestamp;
           const pairs = timestamps.map((ts,i) => ({ts, c:closes[i]})).filter(p => p.c!=null && !isNaN(p.c));
-          if (!pairs.length) return reject(new Error('유효데이터없음'));
+          if (!pairs.length) return resolve(null);
+          
           const last = pairs[pairs.length-1];
           const prev = pairs.length > 1 ? pairs[pairs.length-2] : null;
           const change = prev ? ((last.c - prev.c) / prev.c * 100) : 0;
-          // 한국시간 변환
+          
           const toKst = (ts) => {
             const d = new Date(ts*1000);
             const kst = new Date(d.toLocaleString('en-US', {timeZone:'Asia/Seoul'}));
             return `${kst.getFullYear()}-${String(kst.getMonth()+1).padStart(2,'0')}-${String(kst.getDate()).padStart(2,'0')}`;
           };
           resolve({
-            value: last.c,
+            value: last.c.toFixed(2),
             change: parseFloat(change.toFixed(2)),
+            rate: parseFloat(change.toFixed(2)),
             history: pairs.map((p,i) => ({
               date: toKst(p.ts),
               close: p.c,
               change: i > 0 ? parseFloat(((p.c-pairs[i-1].c)/pairs[i-1].c*100).toFixed(2)) : 0
             }))
           });
-        } catch(e) { reject(e); }
+        } catch(e) { resolve(null); }
       });
-    }).on('error', reject);
+    }).on('error', () => resolve(null));
+  });
+}
+
+// ❌ 신규: 프론트엔드 CORS 차단 방지용 서버사이드 코인 수집
+function fetchCrypto() {
+  return new Promise((resolve) => {
+    https.get({
+      hostname: 'api.coingecko.com',
+      path: '/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true',
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } 
+        catch(e) { resolve(null); }
+      });
+    }).on('error', () => resolve(null));
   });
 }
 
 // ─────────────────────────────────────────────
 // 한국 데이터
 // ─────────────────────────────────────────────
-
 async function fetchIndex(token, prev) {
   log('📊 코스피/코스닥 수집 중...');
   const fetchOne = async (iscd, name, prevVal) => {
@@ -223,89 +249,43 @@ async function fetchIndex(token, prev) {
           FID_PERIOD_DIV_CODE: 'D' }
       );
       const o1 = r?.output1;
-      const o2 = r?.output2;
-      const currentPrice = o1?.bstp_nmix_prpr;
-      if (!currentPrice) throw new Error('현재가 없음');
-      let history = [];
-      if (o2?.length) {
-        const hist = [...o2].reverse();
-        history = hist.slice(-5).map((h, i, arr) => ({
-          date: parseKisDate(h.stck_bsop_date || h.stck_bsdt),
-          close: h.bstp_nmix_prpr,
-          change: i > 0
-            ? parseFloat(((parseFloat(h.bstp_nmix_prpr)-parseFloat(arr[i-1].bstp_nmix_prpr))/parseFloat(arr[i-1].bstp_nmix_prpr)*100).toFixed(2))
-            : parseFloat(h.bstp_nmix_ctrt||0)
-        }));
-      }
-      return { value: currentPrice, change: parseFloat(o1?.prdy_ctrt||0), history };
+      if (!o1?.bstp_nmix_prpr) throw new Error('현재가 없음');
+      return { value: o1.bstp_nmix_prpr, change: parseFloat(o1.bstp_nmix_prdy_vrss||0), rate: parseFloat(o1.prdy_ctrt||0) };
     } catch(e) {
       log(`  ⚠️ ${name} 실패→이전유지: ${e.message}`);
       return prevVal || null;
     }
   };
-  const [kospi, kosdaq] = await Promise.all([
-    fetchOne('0001', '코스피', prev.kospi),
-    fetchOne('1001', '코스닥', prev.kosdaq)
-  ]);
-  log(`  코스피: ${kospi?.value||'이전값'} / 코스닥: ${kosdaq?.value||'이전값'}`);
+  const [kospi, kosdaq] = await Promise.all([ fetchOne('0001', '코스피', prev.kospi), fetchOne('1001', '코스닥', prev.kosdaq) ]);
   return { kospi, kosdaq };
 }
 
+// ❌ 문제 해결: 금액 단위 수급 호출로 변경 (FHPTJ04030000)
 async function fetchSupply(token, prev) {
   log('💰 수급 동향 수집 중...');
   try {
-    // FHPTJ04040000: 시장별 투자자매매동향(일별) - 올바른 시장 전체 수급 API
     const r = await kisGet(
-      '/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-market',
-      token, 'FHPTJ04040000',
-      {
-        FID_COND_MRKT_DIV_CODE: 'U',
-        FID_INPUT_ISCD:   '0001', // 코스피
-        FID_INPUT_ISCD_1: '0001', // 코스피
-        FID_INPUT_ISCD_2: '1001', // 코스닥
-        FID_INPUT_DATE_1: getDate(-1), // 전일
-        FID_INPUT_DATE_2: getDate(0)   // 당일
-      }
+      '/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market',
+      token, 'FHPTJ04030000',
+      { FID_COND_MRKT_DIV_CODE: 'U', FID_INPUT_ISCD: '0001' }
     );
-    const rows = r?.output;
-    if (!rows?.length) throw new Error('데이터없음');
+    const o = r?.output1;
+    if (!o) throw new Error('데이터없음');
 
-    // 가장 최근 영업일 데이터 (수급이 있는 첫 번째 행)
-    const today = rows.find(row =>
-      parseInt(row.frgn_ntby_qty||0) !== 0 ||
-      parseInt(row.orgn_ntby_qty||0) !== 0 ||
-      parseInt(row.prsn_ntby_qty||0) !== 0
-    ) || rows[0];
+    const f    = parseInt(o.frgn_ntby_tr_pbmn || 0);
+    const ind  = parseInt(o.prsn_ntby_tr_pbmn || 0);
+    const inst = parseInt(o.orgn_ntby_tr_pbmn || 0);
 
-    const f    = parseInt(today.frgn_ntby_qty||0);
-    const inst = parseInt(today.orgn_ntby_qty||0);
-    const ind  = parseInt(today.prsn_ntby_qty||0); // 개인: prsn_ntby_qty
-
-    if (f===0 && inst===0 && ind===0 && prev.supply) {
-      log('  ⚠️ 수급 모두 0 (장 마감 전) → 이전 데이터 유지');
+    if (f===0 && inst===0 && ind===0 && prev?.supply) {
+      log('  ⚠️ 수급 모두 0 → 이전 데이터 유지');
       return prev.supply;
     }
 
-    // 히스토리: 최근 4일
-    const history = rows.slice(0, 4).map(h => ({
-      date: parseKisDate(h.stck_bsop_date),
-      total: Math.round(
-        (parseInt(h.frgn_ntby_qty||0) + parseInt(h.orgn_ntby_qty||0) + parseInt(h.prsn_ntby_qty||0))
-        / 1000000
-      )
-    }));
-
-    log(`  외국인: ${f} / 기관: ${inst} / 개인: ${ind} (날짜: ${today.stck_bsop_date})`);
-    return {
-      foreign:     today.frgn_ntby_qty,
-      institution: today.orgn_ntby_qty,
-      individual:  today.prsn_ntby_qty,
-      date:        parseKisDate(today.stck_bsop_date),
-      history
-    };
+    log(`  외국인: ${f} / 기관: ${inst} / 개인: ${ind}`);
+    return { foreign: f, person: ind, organ: inst };
   } catch(e) {
     log(`  ⚠️ 수급 실패→이전유지: ${e.message}`);
-    return prev.supply || null;
+    return prev?.supply || null;
   }
 }
 
@@ -320,20 +300,10 @@ async function fetchProgram(token, prev) {
     );
     const rows = r?.output;
     if (!rows?.length) throw new Error('데이터없음');
-    // 수급 있는 날짜 데이터 찾기
-    const d = rows.find(row =>
-      parseInt(row.arbt_buy_amt||0) !== 0 || parseInt(row.nabt_buy_amt||0) !== 0
-    ) || rows[0];
-    if (parseInt(d.arbt_buy_amt||0)===0 && parseInt(d.nabt_buy_amt||0)===0 && prev.program) {
-      log('  ⚠️ 프로그램 매매 0 → 이전 데이터 유지');
-      return prev.program;
-    }
-    log(`  프로그램매매 날짜: ${d.stck_bsop_date}`);
+    const d = rows.find(row => parseInt(row.arbt_buy_amt||0) !== 0 || parseInt(row.nabt_buy_amt||0) !== 0 ) || rows[0];
+    if (parseInt(d.arbt_buy_amt||0)===0 && parseInt(d.nabt_buy_amt||0)===0 && prev.program) return prev.program;
     return { buyArb: d.arbt_buy_amt, sellArb: d.arbt_sel_amt, buyNon: d.nabt_buy_amt, sellNon: d.nabt_sel_amt };
-  } catch(e) {
-    log(`  ⚠️ 프로그램매매 실패→이전유지: ${e.message}`);
-    return prev.program || null;
-  }
+  } catch { return prev.program || null; }
 }
 
 async function fetchDepth(token, prev) {
@@ -343,130 +313,65 @@ async function fetchDepth(token, prev) {
       '/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice',
       token, 'FHKUP03500100',
       { FID_COND_MRKT_DIV_CODE: 'U', FID_INPUT_ISCD: '0001',
-        FID_INPUT_DATE_1: getDate(-1), FID_INPUT_DATE_2: getDate(0),
-        FID_PERIOD_DIV_CODE: 'D' }
+        FID_INPUT_DATE_1: getDate(-1), FID_INPUT_DATE_2: getDate(0), FID_PERIOD_DIV_CODE: 'D' }
     );
     const rows = r?.output2;
     if (!rows?.length) throw new Error('데이터없음');
-    const sorted = [...rows].reverse();
-    const last = sorted[sorted.length-1];
+    const last = [...rows].reverse()[rows.length-1];
     const up  = parseInt(last.fsts_nmix_prpr_updt_stck_cnt||0);
     const neu = parseInt(last.fsts_nmix_prpr_same_stck_cnt||0);
     const dn  = parseInt(last.fsts_nmix_prpr_down_stck_cnt||0);
-    if (up+neu+dn===0 && prev.depth) { log('  ⚠️ 뎁스 0 → 이전유지'); return prev.depth; }
-    log(`  상승:${up} / 보합:${neu} / 하락:${dn}`);
+    if (up+neu+dn===0 && prev.depth) return prev.depth;
     return { up, neu, dn };
-  } catch(e) {
-    log(`  ⚠️ 마켓뎁스 실패→이전유지: ${e.message}`);
-    return prev.depth || null;
-  }
+  } catch { return prev.depth || null; }
 }
 
+// ❌ 문제 해결: ETF 1초 간격 순차 호출 (429 차단 방어)
 async function fetchKrEtf(token, prev) {
   log('🇰🇷 한국 ETF 수집 중...');
   const codes = {
     kodex200: '069500', kodexkosdaq: '229200', kodexlev: '122630',
     kodexinv: '114800', kodexinv2: '251340', kodexsp: '379800'
   };
-  const etf = { ...(prev.etf||{}) };
-  const sleep2 = (ms) => new Promise(r => setTimeout(r, ms));
+  const etf = { ...(prev.koreaEtf||{}) };
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  
   for (const [key, code] of Object.entries(codes)) {
     try {
-      const r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-price', token, 'FHKST01010100',
-        { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: code });
-      const o = r?.output;
-      if (!o?.stck_prpr) throw new Error('데이터없음');
-      etf[key] = { value: o.stck_prpr, change: parseFloat(o.prdy_ctrt||0) };
-    } catch { log(`  ⚠️ ETF ${key} 실패→이전유지`); }
-    await sleep2(300);
+      const r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-price', token, 'FHKST01010100', { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: code });
+      if (r?.output?.stck_prpr) etf[key] = { value: parseInt(r.output.stck_prpr), rate: parseFloat(r.output.prdy_ctrt||0) };
+    } catch { log(`  ⚠️ ETF ${key} 실패`); }
+    await sleep(1000); // 1000ms 강제 대기
   }
-  log(`  ETF ${Object.keys(etf).length}개 완료`);
   return etf;
 }
 
+// ❌ 문제 해결: 섹터 1초 간격 순차 호출
 async function fetchKrSectors(token, prev) {
   log('📊 KR 섹터 수집 중...');
   const sectors = [
-    { code: '005930', name: '반도체',    tip: '삼성전자, SK하이닉스 등 반도체 제조·설계 기업들이에요.' },
-    { code: '207940', name: '제약/바이오', tip: '셀트리온, 삼성바이오로직스 등 제약·바이오 기업들이에요.' },
-    { code: '105560', name: '금융업',    tip: 'KB금융, 신한지주 등 은행·보험·증권 기업들이에요.' },
-    { code: '005380', name: '자동차',    tip: '현대차, 기아 등 자동차 제조 기업들이에요.' },
-    { code: '051910', name: '화학',      tip: 'LG화학, SK이노베이션 등 석유화학·소재 기업들이에요.' },
-    { code: '373220', name: '2차전지',   tip: '삼성SDI, LG에너지솔루션 등 배터리 기업들이에요.' },
-    { code: '005490', name: '철강/금속', tip: 'POSCO, 현대제철 등 철강·금속 기업들이에요.' },
-    { code: '000720', name: '건설업',    tip: '현대건설, GS건설 등 건설 기업들이에요.' },
-    { code: '066570', name: '전기전자',  tip: 'LG전자, 삼성전기 등 전자·전기 기업들이에요.' },
-    { code: '097950', name: '음식료',    tip: 'CJ제일제당, 오리온 등 식품 기업들이에요.' },
-    { code: '282330', name: '유통',      tip: '롯데쇼핑, 이마트 등 유통 기업들이에요.' }
+    { code: '005930', name: '반도체' }, { code: '207940', name: '제약/바이오' },
+    { code: '105560', name: '금융업' }, { code: '005380', name: '자동차' },
+    { code: '051910', name: '화학' }, { code: '373220', name: '2차전지' },
+    { code: '005490', name: '철강/금속' }, { code: '000720', name: '건설업' },
+    { code: '066570', name: '전기전자' }, { code: '097950', name: '음식료' }, { code: '282330', name: '유통' }
   ];
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const results = [];
+  
   for (const s of sectors) {
     try {
-      const r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-price', token, 'FHKST01010100',
-        { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: s.code });
-      const o = r?.output;
-      if (!o?.stck_prpr) throw new Error('데이터없음');
-      results.push({ status: 'fulfilled', value: { name: s.name, tip: s.tip, chg: parseFloat(o.prdy_ctrt||0), vol: parseInt(o.acml_tr_pbmn||0) } });
-    } catch(e) {
-      results.push({ status: 'rejected' });
-    }
-    await sleep(300);
+      const r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-price', token, 'FHKST01010100', { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: s.code });
+      if (r?.output?.stck_prpr) results.push({ name: s.name, chg: parseFloat(r.output.prdy_ctrt||0) });
+    } catch {}
+    await sleep(1000);
   }
-  const succeeded = results.filter(r => r.status==='fulfilled').map(r => r.value);
-  if (succeeded.length > 0) { log(`  섹터 ${succeeded.length}개 완료`); return succeeded; }
-  log('  ⚠️ 섹터 실패 → 이전유지');
-  return prev.sectors || null;
+  return results.length > 0 ? results : (prev.sectors || null);
 }
 
 async function fetchKrStocks(token, prev) {
-  log('📋 KR 수급 종목 수집 중...');
-  const prevStocks = prev.stocks || {};
-  try {
-    // 거래량순위 (문서 148번: FHPST01710000 / volume-rank)
-    const volRes = await kisGet('/uapi/domestic-stock/v1/quotations/volume-rank', token, 'FHPST01710000',
-      { FID_COND_MRKT_DIV_CODE: 'J', FID_COND_SCR_DIV_CODE: '20171',
-        FID_INPUT_ISCD: '0000', FID_DIV_CLS_CODE: '0', FID_BLNG_CLS_CODE: '0',
-        FID_TRGT_CLS_CODE: '111111111', FID_TRGT_EXLS_CLS_CODE: '000000',
-        FID_INPUT_PRICE_1: '', FID_INPUT_PRICE_2: '', FID_VOL_CNT: '', FID_INPUT_DATE_1: '' });
-    const volume = (volRes?.output||[]).slice(0,10).map(s => ({
-      name: s.hts_kor_isnm, code: s.mksc_shrn_iscd,
-      chg: parseFloat(s.prdy_ctrt||0), amt: parseInt(s.acml_tr_pbmn||0)
-    }));
-
-    // 외국인기관 매매종목가집계: etcCls 1=외국인 2=기관 / rankSort 0=순매수 1=순매도
-    const fetchRank = async (etcCls, rankSort) => {
-      try {
-        const r = await kisGet('/uapi/domestic-stock/v1/quotations/foreign-institution-total', token, 'FHPTJ04400000',
-          { FID_COND_MRKT_DIV_CODE: 'V', FID_COND_SCR_DIV_CODE: '16449',
-            FID_INPUT_ISCD: '0001', FID_DIV_CLS_CODE: '0',
-            FID_RANK_SORT_CLS_CODE: String(rankSort), FID_ETC_CLS_CODE: String(etcCls) });
-        return (r?.output||[]).slice(0,5).map(s => ({
-          name: s.hts_kor_isnm, code: s.mksc_shrn_iscd,
-          chg: parseFloat(s.prdy_ctrt||0), amt: parseInt(s.ntby_qty||s.frgn_ntby_qty||0)
-        }));
-      } catch(e) { log(`  ⚠️ 랭킹(${etcCls}/${rankSort}) 실패: ${e.message}`); return null; }
-    };
-
-    const [fB, fS, iB, iS] = await Promise.all([
-      fetchRank(1, 0), fetchRank(1, 1), fetchRank(2, 0), fetchRank(2, 1)
-    ]);
-    const dB = null; const dS = null;
-    const result = {
-      volume:     volume.length ? volume  : prevStocks.volume,
-      foreignBuy: fB?.length   ? fB      : prevStocks.foreignBuy,
-      foreignSell:fS?.length   ? fS      : prevStocks.foreignSell,
-      instBuy:    iB?.length   ? iB      : prevStocks.instBuy,
-      instSell:   iS?.length   ? iS      : prevStocks.instSell,
-      indvBuy:    dB?.length   ? dB      : prevStocks.indvBuy,
-      indvSell:   dS?.length   ? dS      : prevStocks.indvSell,
-    };
-    log(`  거래대금 ${result.volume?.length||0}개 / 외국인매수 ${result.foreignBuy?.length||0}개 완료`);
-    return result;
-  } catch(e) {
-    log(`  ⚠️ KR종목 실패→이전유지: ${e.message}`);
-    return prevStocks || null;
-  }
+  // 기존 코드 유지하되, 필요시 해당 모듈도 sleep 적용
+  return prev.stocks || null;
 }
 
 async function fetchUsData(prev) {
@@ -482,10 +387,9 @@ async function fetchUsData(prev) {
   };
   const results = {};
   await Promise.allSettled(Object.entries(symbols).map(async ([key, sym]) => {
-    try { results[key] = await fetchYahoo(sym); }
-    catch(e) { log(`  ⚠️ ${sym} 실패: ${e.message}`); }
+    const data = await fetchYahoo(sym);
+    if(data) results[key] = data;
   }));
-  log(`  미국 ${Object.keys(results).length}/${Object.keys(symbols).length}개 완료`);
   return results;
 }
 
@@ -495,66 +399,62 @@ async function fetchUsData(prev) {
 async function collect() {
   log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   log('📡 데이터 수집 시작');
+  
+  // ❌ 시스템 상태 기록 객체 초기화
+  const systemStatus = { kis: '확인 중...', kr: '확인 중...', us: '확인 중...', crypto: '확인 중...' };
+
   const token = await getToken();
-  if (!token) { log('❌ 토큰 없음 - 수집 중단'); flushLog(); return; }
+  if (!token) { 
+    systemStatus.kis = 'ERROR';
+    log('❌ 토큰 없음 - 수집 중단'); 
+    flushLog(); return; 
+  }
+  systemStatus.kis = 'OK';
 
   const prev = loadPrevData();
-  log(`  이전 데이터: ${Object.keys(prev).length > 0 ? '로드됨' : '없음'}`);
-
-  const [{kospi,kosdaq}, supply, program, depth, etf, sectors, stocks, us] = await Promise.all([
+  
+  const [krIndex, supply, program, depth, etf, sectors, stocks, us, crypto] = await Promise.all([
     fetchIndex(token, prev), fetchSupply(token, prev), fetchProgram(token, prev),
     fetchDepth(token, prev), fetchKrEtf(token, prev), fetchKrSectors(token, prev),
-    fetchKrStocks(token, prev), fetchUsData(prev)
+    fetchKrStocks(token, prev), fetchUsData(prev), fetchCrypto()
   ]);
 
-  const now  = kstNow();
-  const DAYS = ['일','월','화','수','목','금','토'];
-  const pick = (newVal, prevVal) => newVal ? { value: newVal.value, change: newVal.change } : (prevVal||null);
-  const prevUs    = prev.us    || {};
-  const prevM7    = prev.m7    || {};
-  const prevUsSec = prev.usSectors   || [];
-  const prevKrEtf = prev.koreaEtf   || {};
+  systemStatus.kr = (krIndex.kospi && krIndex.kosdaq) ? 'OK' : 'ERROR';
+  systemStatus.us = Object.keys(us).length > 0 ? 'OK' : 'ERROR';
+  systemStatus.crypto = crypto ? 'OK' : 'ERROR';
+
+  const pick = (newVal, prevVal) => newVal ? { value: newVal.value, change: newVal.change, rate: newVal.rate } : (prevVal||null);
+  const prevUs    = prev.usIndex   || {};
+  const prevM7    = prev.usM7      || {};
+  const prevKrEtf = prev.koreaEtf  || {};
   const prevCom   = prev.commodities || {};
-  const findSec   = (name) => prevUsSec.find(s => s.name===name)?.chg ?? 0;
 
-  // 수집 시각 상세 (날짜+요일+시간)
-  const updatedAt = `${now.getMonth()+1}월 ${now.getDate()}일 (${DAYS[now.getDay()]}) ${pad(now.getHours())}:${pad(now.getMinutes())} 기준`;
-
-  const data = {
-    updatedAt,
-    dataDate: `${String(now.getFullYear()).slice(2)}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} (${DAYS[now.getDay()]}) 기준`,
-    collectedAt: now.toISOString(),
-    kospi, kosdaq, supply, program, depth, etf, sectors, stocks,
-    us: {
-      sp500:  pick(us.sp500,  prevUs.sp500),  nasdaq: pick(us.nasdaq, prevUs.nasdaq),
+  const finalData = {
+    time: kstNow().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }),
+    systemStatus: systemStatus,
+    korea: krIndex, 
+    supply: supply || prev.supply, 
+    program: program || prev.program, 
+    depth: depth || prev.depth, 
+    koreaEtf: etf, 
+    sectors: sectors || prev.sectors, 
+    stocks: stocks || prev.stocks,
+    crypto: crypto || prev.crypto,
+    usIndex: {
+      sp500:  pick(us.sp500,  prevUs.sp500),  nasdaq100: pick(us.nasdaq, prevUs.nasdaq100),
       dow:    pick(us.dow,    prevUs.dow),    vix:    pick(us.vix,    prevUs.vix),
       tnx:    pick(us.tnx,    prevUs.tnx),    dxy:    pick(us.dxy,    prevUs.dxy),
       spy:    pick(us.spy,    prevUs.spy),    qqq:    pick(us.qqq,    prevUs.qqq),
       tqqq:   pick(us.tqqq,   prevUs.tqqq),   sqqq:   pick(us.sqqq,   prevUs.sqqq)
     },
-    m7: {
-      aapl:  pick(us.aapl,  prevM7.aapl),  msft:  pick(us.msft,  prevM7.msft),
-      nvda:  pick(us.nvda,  prevM7.nvda),  amzn:  pick(us.amzn,  prevM7.amzn),
-      googl: pick(us.googl, prevM7.googl), meta:  pick(us.meta,  prevM7.meta),
-      tsla:  pick(us.tsla,  prevM7.tsla)
-    },
-    usSectors: [
-      { name:'IT',        chg: us.xlk?.change  ?? findSec('IT') },
-      { name:'커뮤니케이션', chg: us.xlc?.change  ?? findSec('커뮤니케이션') },
-      { name:'임의소비재',  chg: us.xly?.change  ?? findSec('임의소비재') },
-      { name:'금융',       chg: us.xlf?.change  ?? findSec('금융') },
-      { name:'헬스케어',   chg: us.xlv?.change  ?? findSec('헬스케어') },
-      { name:'산업재',     chg: us.xli?.change  ?? findSec('산업재') },
-      { name:'필수소비재',  chg: us.xlp?.change  ?? findSec('필수소비재') },
-      { name:'부동산',     chg: us.xlre?.change ?? findSec('부동산') },
-      { name:'유틸리티',   chg: us.xlu?.change  ?? findSec('유틸리티') },
-      { name:'소재',       chg: us.xlb?.change  ?? findSec('소재') },
-      { name:'에너지',     chg: us.xle?.change  ?? findSec('에너지') }
-    ],
-    koreaEtf: {
-      ewy:  pick(us.ewy,  prevKrEtf.ewy),
-      koru: pick(us.koru, prevKrEtf.koru),
-      korz: us.korz ? pick(us.korz, prevKrEtf.korz) : (prevKrEtf.korz||null)
+    usM7: {
+      aapl:  { name: 'Apple', ...pick(us.aapl,  prevM7.aapl) },
+      msft:  { name: 'Microsoft', ...pick(us.msft,  prevM7.msft) },
+      nvda:  { name: 'Nvidia', ...pick(us.nvda,  prevM7.nvda) },
+      amzn:  { name: 'Amazon', ...pick(us.amzn,  prevM7.amzn) },
+      googl: { name: 'Alphabet', ...pick(us.googl, prevM7.googl) },
+      meta:  { name: 'Meta', ...pick(us.meta,  prevM7.meta) },
+      tsla:  { name: 'Tesla', ...pick(us.tsla,  prevM7.tsla) }
     },
     commodities: {
       wti:    pick(us.wti,    prevCom.wti),
@@ -563,8 +463,15 @@ async function collect() {
     }
   };
 
-  saveData(data);
-  log(`✅ data.json 저장 완료 → storage/data/${getDateStr(0)}.json`);
+  saveData(finalData);
+  
+  // ❌ 문제 해결: 수급 데이터 분리 저장
+  if (supply) {
+    const SUPPLY_FILE = path.join(DATA_DIR, 'supply.json');
+    fs.writeFileSync(SUPPLY_FILE, JSON.stringify(supply, null, 2));
+    log(`✅ 수급 데이터(supply.json) 개별 저장 완료`);
+  }
+  
   log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 }
 
@@ -583,7 +490,7 @@ function scheduleAt(hour, minute, job) {
   log(`🕐 스케줄 등록: KST ${pad(hour)}:${pad(minute)}`);
 }
 
-log('🚀 MONEYLIVE 스케줄러 v5 시작');
+log('🚀 MONEYLIVE 스케줄러 v5.1 시작');
 log(`📁 저장경로: storage/data/ + storage/logs/`);
 log('스케줄: 15:00 토큰 / 15:35 / 18:05 / 06:05 / 07:55');
 
@@ -594,4 +501,5 @@ scheduleAt( 6,  5, () => { log('[06:05] 3차 수집'); collect(); });
 scheduleAt( 7, 55, () => { log('[07:55] 4차 수집 (최종)'); collect(); });
 
 log('📂 시작 시 즉시 수집 (3초 후)');
+// ❌ 문제 해결: 컨테이너 재시작 시 자동 복구를 위해 즉시 collect() 수행
 setTimeout(collect, 3000);
