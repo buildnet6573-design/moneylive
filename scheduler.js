@@ -260,7 +260,7 @@ async function fetchIndex(token, prev) {
   return { kospi, kosdaq };
 }
 
-// ❌ 문제 해결: 금액 단위 수급 호출로 변경 (FHPTJ04030000)
+// ❌ 문제 해결: 금액 단위 수급 호출로 변경 (FHPTJ04030000) 및 에러 추적 로그 추가
 async function fetchSupply(token, prev) {
   log('💰 수급 동향 수집 중...');
   try {
@@ -269,9 +269,14 @@ async function fetchSupply(token, prev) {
       token, 'FHPTJ04030000',
       { FID_COND_MRKT_DIV_CODE: 'U', FID_INPUT_ISCD: '0001' }
     );
-    const o = r?.output1;
-    if (!o) throw new Error('데이터없음');
 
+    // [에러 추적 로직] 정상 응답(rt_cd === '0')이 아니거나 output1 데이터가 없을 경우
+    if (!r || r.rt_cd !== '0' || !r.output1) {
+      log(`[수급 API 상세 응답] ${JSON.stringify(r)}`);
+      throw new Error('데이터없음 또는 API 거절');
+    }
+
+    const o = r.output1;
     const f    = parseInt(o.frgn_ntby_tr_pbmn || 0);
     const ind  = parseInt(o.prsn_ntby_tr_pbmn || 0);
     const inst = parseInt(o.orgn_ntby_tr_pbmn || 0);
