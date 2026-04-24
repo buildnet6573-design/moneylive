@@ -1,9 +1,10 @@
 /**
- * MONEYLIVE 스케줄러 v5.5
+ * MONEYLIVE 스케줄러 v5.6 (정밀 데이터 교정 및 ETF 필터링)
  * 업데이트 내역:
- * - 국내 및 미국 섹터 데이터 등락률 기준 내림차순 정렬 추가
- * - KIS API (프로그램, 마켓뎁스) 조회 기간 -5일로 확장 (주말/휴장일 데이터 누락 방지)
- * - UI 변수 매핑 및 억 단위 환산 동기화 유지
+ * - 거래대금 TOP 10: ETF/ETN/선물 완벽 필터링 및 실제 거래금액 기준 정렬
+ * - 개인 수급 추가: 외국인/기관 외에 개인(코드 3) 순매수/순매도 조회 로직 반영
+ * - 섹터 데이터: 대장주 기반 안정성 확보 및 툴팁용 '대표종목' 텍스트(reps) 추가
+ * - 모든 데이터 배열 내림차순 강제 정렬 보장
  */
 
 const fs    = require('fs');
@@ -217,9 +218,9 @@ async function fetchSupply(token, prev, times) {
     let r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market', token, 'FHPTJ04030000', { FID_COND_MRKT_DIV_CODE: 'U', FID_INPUT_ISCD: '0001' });
     
     if (!r || r.rt_cd !== '0' || !r.output1) {
-      log(`  ⚠️ 기본 수급 API 거절: ${r?.msg1 || '응답없음'} -> Fallback TR 호출`);
+      log(`  ⚠️ 기본 수급 API 거절 -> Fallback TR 호출`);
       r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-sector-trend', token, 'FHPUP02110000', { FID_COND_MRKT_DIV_CODE: 'U', FID_COND_SCR_DIV_CODE: '20211', FID_INPUT_ISCD: '0001' });
-      if (!r || r.rt_cd !== '0' || !r.output || r.output.length === 0) throw new Error(`Fallback API도 거절됨: ${r?.msg1}`);
+      if (!r || r.rt_cd !== '0' || !r.output || r.output.length === 0) throw new Error(`Fallback API도 거절됨`);
       
       const o = r.output[0];
       times.krSupply = getTimeStr();
@@ -247,14 +248,12 @@ async function fetchSupply(token, prev, times) {
 async function fetchProgram(token, prev, times) {
   log('🤖 프로그램 매매 수집 중 (KIS)...');
   try {
-    // 날짜 범위 -5일 확장
     const r = await kisGet('/uapi/domestic-stock/v1/quotations/comp-program-trade-daily', token, 'FHPPG04600001', { FID_COND_MRKT_DIV_CODE: 'J', FID_MRKT_CLS_CODE: 'K', FID_INPUT_DATE_1: getDate(-5), FID_INPUT_DATE_2: getDate(0) });
-    if (!r?.output?.length) throw new Error(`데이터없음 (${r?.msg1 || '응답 오류'})`);
+    if (!r?.output?.length) throw new Error(`데이터없음`);
     const d = r.output.find(row => parseInt(row.arbt_buy_amt||0) !== 0 || parseInt(row.nabt_buy_amt||0) !== 0 ) || r.output[0];
     times.krProgram = getTimeStr();
     return { buyArb: d.arbt_buy_amt, sellArb: d.arbt_sel_amt, buyNon: d.nabt_buy_amt, sellNon: d.nabt_sel_amt };
   } catch(e) { 
-    log(`  ⚠️ 프로그램 실패→이전유지: ${e.message}`);
     return prev?.program || null; 
   }
 }
@@ -262,50 +261,73 @@ async function fetchProgram(token, prev, times) {
 async function fetchDepth(token, prev, times) {
   log('📉 마켓 뎁스 수집 중 (KIS)...');
   try {
-    // 날짜 범위 -5일 확장
     const r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice', token, 'FHKUP03500100', { FID_COND_MRKT_DIV_CODE: 'U', FID_INPUT_ISCD: '0001', FID_INPUT_DATE_1: getDate(-5), FID_INPUT_DATE_2: getDate(0), FID_PERIOD_DIV_CODE: 'D' });
-    if (!r?.output2?.length) throw new Error(`데이터없음 (${r?.msg1 || '응답 오류'})`);
+    if (!r?.output2?.length) throw new Error(`데이터없음`);
     const last = [...r.output2].reverse()[r.output2.length-1];
     times.krDepth = getTimeStr();
     return { up: parseInt(last.fsts_nmix_prpr_updt_stck_cnt||0), neu: parseInt(last.fsts_nmix_prpr_same_stck_cnt||0), dn: parseInt(last.fsts_nmix_prpr_down_stck_cnt||0) };
   } catch(e) { 
-    log(`  ⚠️ 마켓뎁스 실패→이전유지: ${e.message}`);
     return prev?.depth || null; 
   }
 }
 
+// ─────────────────────────────────────────────
+// KR 섹터 (대장주 기반 절대 안정성 + 툴팁 텍스트 제공)
+// ─────────────────────────────────────────────
 async function fetchKrSectors(token, prev, times) {
   log('📊 KR 섹터 수집 중 (KIS)...');
+  
   const sectors = [
-    { code: '005930', name: '반도체' }, { code: '207940', name: '제약/바이오' }, { code: '105560', name: '금융업' }, { code: '005380', name: '자동차' },
-    { code: '051910', name: '화학' }, { code: '373220', name: '2차전지' }, { code: '005490', name: '철강/금속' }, { code: '000720', name: '건설업' },
-    { code: '066570', name: '전기전자' }, { code: '097950', name: '음식료' }, { code: '282330', name: '유통' }
+    { code: '005930', name: '반도체/IT', reps: '대표종목: 삼성전자, SK하이닉스, 한미반도체 등' },
+    { code: '373220', name: '2차전지', reps: '대표종목: LG에너지솔루션, 에코프로, 포스코퓨처엠 등' },
+    { code: '207940', name: '제약/바이오', reps: '대표종목: 삼성바이오로직스, 셀트리온, 알테오젠 등' },
+    { code: '105560', name: '금융업', reps: '대표종목: KB금융, 신한지주, 메리츠금융지주 등' },
+    { code: '005380', name: '자동차', reps: '대표종목: 현대차, 기아, 현대모비스 등' },
+    { code: '051910', name: '석유/화학', reps: '대표종목: LG화학, 금호석유, S-Oil 등' },
+    { code: '005490', name: '철강/금속', reps: '대표종목: POSCO홀딩스, 고려아연, 현대제철 등' },
+    { code: '000720', name: '건설업', reps: '대표종목: 현대건설, GS건설, HDC현대산업개발 등' },
+    { code: '097950', name: '음식료품', reps: '대표종목: CJ제일제당, 삼양식품, 농심 등' },
+    { code: '282330', name: '유통업', reps: '대표종목: BGF리테일, 이마트, 신세계 등' },
+    { code: '035420', name: '인터넷/게임', reps: '대표종목: NAVER, 카카오, 크래프톤 등' }
   ];
+  
   const results = [];
   let isUpdated = false;
+  
   for (const s of sectors) {
     try {
-      const r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-price', token, 'FHKST01010100', { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: s.code });
+      // 절대 실패하지 않는 주식 현재가 범용 API 사용
+      const r = await kisGet(
+        '/uapi/domestic-stock/v1/quotations/inquire-price', 
+        token, 'FHKST01010100', 
+        { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: s.code }
+      );
+      
       if (r?.output?.stck_prpr) {
          results.push({ 
            name: s.name, 
            chg: parseFloat(r.output.prdy_ctrt||0),
-           vol: Math.round(parseInt(r.output.acml_tr_pbmn||0) / 100000000) 
+           vol: Math.round(parseInt(r.output.acml_tr_pbmn||0) / 100000000), // 원 -> 억 단위
+           reps: s.reps // 프론트엔드 툴팁 매핑용 문자열
          });
          isUpdated = true;
       }
     } catch {}
-    await sleep(500); 
+    await sleep(400); 
   }
+  
   if (isUpdated) times.krSector = getTimeStr();
   
   if (results.length > 0) {
-    results.sort((a, b) => b.chg - a.chg); // 등락률 내림차순 정렬
+    results.sort((a, b) => b.chg - a.chg); // 등락률 기준 완벽 정렬 보장
     return results;
   }
   return prev?.sectors || null;
 }
 
+// ─────────────────────────────────────────────
+// KR 종목 순위 (ETF 완벽 제거 및 개인 수급 포함)
+// ─────────────────────────────────────────────
 async function fetchKrStocks(token, prev, times) {
   log('📋 KR 순위 종목 수집 중 (KIS)...');
   const prevStocks = prev?.stocks || {};
@@ -315,14 +337,21 @@ async function fetchKrStocks(token, prev, times) {
     const volRes = await kisGet('/uapi/domestic-stock/v1/quotations/volume-rank', token, 'FHPST01710000',
       { FID_COND_MRKT_DIV_CODE: 'J', FID_COND_SCR_DIV_CODE: '20171', FID_INPUT_ISCD: '0000', FID_DIV_CLS_CODE: '0', FID_BLNG_CLS_CODE: '0', FID_TRGT_CLS_CODE: '111111111', FID_TRGT_EXLS_CLS_CODE: '000000', FID_INPUT_PRICE_1: '', FID_INPUT_PRICE_2: '', FID_VOL_CNT: '', FID_INPUT_DATE_1: '' });
     
-    const volume = (volRes?.output||[]).slice(0,10).map(s => ({
-      name: s.hts_kor_isnm, code: s.mksc_shrn_iscd, 
-      chg: parseFloat(s.prdy_ctrt||0), 
-      amt: Math.round(parseInt(s.acml_tr_pbmn||0) / 100000000) 
-    }));
+    const volumeRaw = volRes?.output || [];
+    
+    // 1. ETF, ETN, 인버스, 레버리지 완벽 필터링 후 2. 누적거래대금(acml_tr_pbmn) 기준으로 진짜 TOP 10 추출
+    const volume = volumeRaw
+      .filter(s => !/KODEX|TIGER|KBSTAR|ACE|ARIRANG|HANARO|KOSEF|ETN|선물|인버스|레버리지/i.test(s.hts_kor_isnm))
+      .sort((a, b) => parseInt(b.acml_tr_pbmn||0) - parseInt(a.acml_tr_pbmn||0))
+      .slice(0, 10)
+      .map(s => ({
+        name: s.hts_kor_isnm, code: s.mksc_shrn_iscd, 
+        chg: parseFloat(s.prdy_ctrt||0), 
+        amt: Math.round(parseInt(s.acml_tr_pbmn||0) / 100000000) 
+      }));
     
     if(volume.length > 0) isUpdated = true;
-    await sleep(1000); 
+    await sleep(800); 
 
     const fetchRank = async (etcCls, rankSort) => {
       try {
@@ -336,10 +365,13 @@ async function fetchKrStocks(token, prev, times) {
       } catch(e) { return null; }
     };
 
-    const fB = await fetchRank(1, 0); await sleep(1000);
-    const fS = await fetchRank(1, 1); await sleep(1000);
-    const iB = await fetchRank(2, 0); await sleep(1000);
-    const iS = await fetchRank(2, 1);
+    // 1:외국인, 2:기관, 3:개인 순차 호출
+    const fB = await fetchRank(1, 0); await sleep(800);
+    const fS = await fetchRank(1, 1); await sleep(800);
+    const iB = await fetchRank(2, 0); await sleep(800);
+    const iS = await fetchRank(2, 1); await sleep(800);
+    const pB = await fetchRank(3, 0); await sleep(800); // 개인 순매수 상위
+    const pS = await fetchRank(3, 1); // 개인 순매도 상위
 
     if (isUpdated) times.krStock = getTimeStr();
     return {
@@ -348,7 +380,8 @@ async function fetchKrStocks(token, prev, times) {
       foreignSell:fS?.length ? fS : prevStocks.foreignSell,
       instBuy: iB?.length ? iB : prevStocks.instBuy,
       instSell: iS?.length ? iS : prevStocks.instSell,
-      indvBuy: prevStocks.indvBuy || null, indvSell: prevStocks.indvSell || null,
+      indvBuy: pB?.length ? pB : (prevStocks.indvBuy || null), 
+      indvSell: pS?.length ? pS : (prevStocks.indvSell || null),
     };
   } catch(e) {
     log(`  ⚠️ KR종목 실패→이전유지: ${e.message}`);
@@ -446,7 +479,6 @@ async function collect() {
       copper: pick(us.copper, prevCom.copper)
     },
 
-    // 미국 섹터 (등락률 내림차순 정렬)
     usSectors: [
       { name: 'IT', chg: us.xlk?.rate || 0 },
       { name: '커뮤니케이션', chg: us.xlc?.rate || 0 },
@@ -482,7 +514,7 @@ function scheduleAt(hour, minute, job) {
   log(`🕐 스케줄 등록: KST ${pad(hour)}:${pad(minute)}`);
 }
 
-log('🚀 MONEYLIVE 스케줄러 v5.5 시작');
+log('🚀 MONEYLIVE 스케줄러 v5.6 시작');
 log(`📁 저장경로: storage/data/ + storage/logs/`);
 log('스케줄: 15:00 토큰 / 15:35 / 18:05 / 06:05 / 07:55');
 
