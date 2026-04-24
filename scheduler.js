@@ -1,5 +1,9 @@
 /**
- * MONEYLIVE 스케줄러 v5.4 (UI 변수 매핑 및 억 단위 환산 완벽 동기화)
+ * MONEYLIVE 스케줄러 v5.5
+ * 업데이트 내역:
+ * - 국내 및 미국 섹터 데이터 등락률 기준 내림차순 정렬 추가
+ * - KIS API (프로그램, 마켓뎁스) 조회 기간 -5일로 확장 (주말/휴장일 데이터 누락 방지)
+ * - UI 변수 매핑 및 억 단위 환산 동기화 유지
  */
 
 const fs    = require('fs');
@@ -210,17 +214,14 @@ async function fetchUsData(prev, times) {
 async function fetchSupply(token, prev, times) {
   log('💰 수급 동향 수집 중 (KIS)...');
   try {
-    // 기본 TR
     let r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market', token, 'FHPTJ04030000', { FID_COND_MRKT_DIV_CODE: 'U', FID_INPUT_ISCD: '0001' });
     
-    // 거절 시 대체 TR (업종별 투자자 매매동향)
     if (!r || r.rt_cd !== '0' || !r.output1) {
-      log('  ⚠️ 기본 수급 API 거절 -> Fallback TR 호출');
+      log(`  ⚠️ 기본 수급 API 거절: ${r?.msg1 || '응답없음'} -> Fallback TR 호출`);
       r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-sector-trend', token, 'FHPUP02110000', { FID_COND_MRKT_DIV_CODE: 'U', FID_COND_SCR_DIV_CODE: '20211', FID_INPUT_ISCD: '0001' });
-      if (!r || r.rt_cd !== '0' || !r.output || r.output.length === 0) throw new Error('Fallback API도 거절됨');
+      if (!r || r.rt_cd !== '0' || !r.output || r.output.length === 0) throw new Error(`Fallback API도 거절됨: ${r?.msg1}`);
       
       const o = r.output[0];
-      // 백만원 단위 -> UI 억 단위 대응을 위해 /100
       times.krSupply = getTimeStr();
       return { 
         foreign: parseInt(o.frgn_ntby_tr_pbmn||0) * 10000, 
@@ -230,7 +231,6 @@ async function fetchSupply(token, prev, times) {
     }
 
     const o = r.output1;
-    // 원 단위 -> UI 억 단위 환산을 위한 변환 (/100)
     const f = parseInt(o.frgn_ntby_tr_pbmn || 0) / 100;
     const ind = parseInt(o.prsn_ntby_tr_pbmn || 0) / 100;
     const inst = parseInt(o.orgn_ntby_tr_pbmn || 0) / 100;
@@ -247,23 +247,31 @@ async function fetchSupply(token, prev, times) {
 async function fetchProgram(token, prev, times) {
   log('🤖 프로그램 매매 수집 중 (KIS)...');
   try {
-    const r = await kisGet('/uapi/domestic-stock/v1/quotations/comp-program-trade-daily', token, 'FHPPG04600001', { FID_COND_MRKT_DIV_CODE: 'J', FID_MRKT_CLS_CODE: 'K', FID_INPUT_DATE_1: getDate(-1), FID_INPUT_DATE_2: getDate(0) });
-    if (!r?.output?.length) throw new Error('데이터없음');
+    // 날짜 범위 -5일 확장
+    const r = await kisGet('/uapi/domestic-stock/v1/quotations/comp-program-trade-daily', token, 'FHPPG04600001', { FID_COND_MRKT_DIV_CODE: 'J', FID_MRKT_CLS_CODE: 'K', FID_INPUT_DATE_1: getDate(-5), FID_INPUT_DATE_2: getDate(0) });
+    if (!r?.output?.length) throw new Error(`데이터없음 (${r?.msg1 || '응답 오류'})`);
     const d = r.output.find(row => parseInt(row.arbt_buy_amt||0) !== 0 || parseInt(row.nabt_buy_amt||0) !== 0 ) || r.output[0];
     times.krProgram = getTimeStr();
     return { buyArb: d.arbt_buy_amt, sellArb: d.arbt_sel_amt, buyNon: d.nabt_buy_amt, sellNon: d.nabt_sel_amt };
-  } catch { return prev?.program || null; }
+  } catch(e) { 
+    log(`  ⚠️ 프로그램 실패→이전유지: ${e.message}`);
+    return prev?.program || null; 
+  }
 }
 
 async function fetchDepth(token, prev, times) {
   log('📉 마켓 뎁스 수집 중 (KIS)...');
   try {
-    const r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice', token, 'FHKUP03500100', { FID_COND_MRKT_DIV_CODE: 'U', FID_INPUT_ISCD: '0001', FID_INPUT_DATE_1: getDate(-1), FID_INPUT_DATE_2: getDate(0), FID_PERIOD_DIV_CODE: 'D' });
-    if (!r?.output2?.length) throw new Error('데이터없음');
+    // 날짜 범위 -5일 확장
+    const r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice', token, 'FHKUP03500100', { FID_COND_MRKT_DIV_CODE: 'U', FID_INPUT_ISCD: '0001', FID_INPUT_DATE_1: getDate(-5), FID_INPUT_DATE_2: getDate(0), FID_PERIOD_DIV_CODE: 'D' });
+    if (!r?.output2?.length) throw new Error(`데이터없음 (${r?.msg1 || '응답 오류'})`);
     const last = [...r.output2].reverse()[r.output2.length-1];
     times.krDepth = getTimeStr();
     return { up: parseInt(last.fsts_nmix_prpr_updt_stck_cnt||0), neu: parseInt(last.fsts_nmix_prpr_same_stck_cnt||0), dn: parseInt(last.fsts_nmix_prpr_down_stck_cnt||0) };
-  } catch { return prev?.depth || null; }
+  } catch(e) { 
+    log(`  ⚠️ 마켓뎁스 실패→이전유지: ${e.message}`);
+    return prev?.depth || null; 
+  }
 }
 
 async function fetchKrSectors(token, prev, times) {
@@ -282,7 +290,7 @@ async function fetchKrSectors(token, prev, times) {
          results.push({ 
            name: s.name, 
            chg: parseFloat(r.output.prdy_ctrt||0),
-           vol: Math.round(parseInt(r.output.acml_tr_pbmn||0) / 100000000) // 누적대금(원) -> 억 단위
+           vol: Math.round(parseInt(r.output.acml_tr_pbmn||0) / 100000000) 
          });
          isUpdated = true;
       }
@@ -290,7 +298,12 @@ async function fetchKrSectors(token, prev, times) {
     await sleep(500); 
   }
   if (isUpdated) times.krSector = getTimeStr();
-  return results.length > 0 ? results : (prev?.sectors || null);
+  
+  if (results.length > 0) {
+    results.sort((a, b) => b.chg - a.chg); // 등락률 내림차순 정렬
+    return results;
+  }
+  return prev?.sectors || null;
 }
 
 async function fetchKrStocks(token, prev, times) {
@@ -305,7 +318,7 @@ async function fetchKrStocks(token, prev, times) {
     const volume = (volRes?.output||[]).slice(0,10).map(s => ({
       name: s.hts_kor_isnm, code: s.mksc_shrn_iscd, 
       chg: parseFloat(s.prdy_ctrt||0), 
-      amt: Math.round(parseInt(s.acml_tr_pbmn||0) / 100000000) // 누적대금(원) -> 억 단위
+      amt: Math.round(parseInt(s.acml_tr_pbmn||0) / 100000000) 
     }));
     
     if(volume.length > 0) isUpdated = true;
@@ -318,7 +331,7 @@ async function fetchKrStocks(token, prev, times) {
         return (r?.output||[]).slice(0,5).map(s => ({ 
           name: s.hts_kor_isnm, code: s.mksc_shrn_iscd, 
           chg: parseFloat(s.prdy_ctrt||0), 
-          amt: Math.round(parseInt(s.ntby_tr_pbmn||s.frgn_ntby_tr_pbmn||0) / 100000000) // 매매대금(원) -> 억 단위
+          amt: Math.round(parseInt(s.ntby_tr_pbmn||s.frgn_ntby_tr_pbmn||0) / 100000000) 
         }));
       } catch(e) { return null; }
     };
@@ -385,39 +398,32 @@ async function collect() {
   const prevKrEtf = prev.koreaEtf || {};
   const prevCom   = prev.commodities || {};
 
-  // 프론트엔드(index.html)가 요구하는 정확한 변수명으로 구조화
   const finalData = {
     time: kstNow().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }),
     updateTimes: updateTimes, 
     systemStatus: systemStatus,
     
-    // 국내 지수
     kospi: krIndex.kospi, 
     kosdaq: krIndex.kosdaq,
     
-    // KIS 데이터
     supply: supply || prev.supply, 
     program: program || prev.program, 
     depth: depth || prev.depth, 
     sectors: sectors || prev.sectors, 
     stocks: stocks || prev.stocks,
     
-    // 한국 ETF (KODEX 등)
     etf: etf, 
     
-    // 암호화폐
     crypto: crypto || prev.crypto,
     
-    // 미국 시장 데이터
     us: {
-      sp500:  pick(us.sp500,  prevUs.sp500),  nasdaq: pick(us.nasdaq, prevUs.nasdaq), // index.html 명세 동기화
+      sp500:  pick(us.sp500,  prevUs.sp500),  nasdaq: pick(us.nasdaq, prevUs.nasdaq), 
       dow:    pick(us.dow,    prevUs.dow),    vix:    pick(us.vix,    prevUs.vix),
       tnx:    pick(us.tnx,    prevUs.tnx),    dxy:    pick(us.dxy,    prevUs.dxy),
       spy:    pick(us.spy,    prevUs.spy),    qqq:    pick(us.qqq,    prevUs.qqq),
       tqqq:   pick(us.tqqq,   prevUs.tqqq),   sqqq:   pick(us.sqqq,   prevUs.sqqq)
     },
     
-    // 빅테크 M7
     m7: {
       aapl:  { name: 'Apple', ...pick(us.aapl,  prevM7.aapl) },
       msft:  { name: 'Microsoft', ...pick(us.msft,  prevM7.msft) },
@@ -428,21 +434,19 @@ async function collect() {
       tsla:  { name: 'Tesla', ...pick(us.tsla,  prevM7.tsla) }
     },
     
-    // 한국 관련 미국 ETF
     koreaEtf: {
       ewy:  pick(us.ewy,  prevKrEtf.ewy),
       koru: pick(us.koru, prevKrEtf.koru),
       korz: pick(us.korz, prevKrEtf.korz)
     },
     
-    // 원자재
     commodities: {
       wti:    pick(us.wti,    prevCom.wti),
       gold:   pick(us.gold,   prevCom.gold),
       copper: pick(us.copper, prevCom.copper)
     },
 
-    // 미국 섹터
+    // 미국 섹터 (등락률 내림차순 정렬)
     usSectors: [
       { name: 'IT', chg: us.xlk?.rate || 0 },
       { name: '커뮤니케이션', chg: us.xlc?.rate || 0 },
@@ -455,7 +459,7 @@ async function collect() {
       { name: '유틸리티', chg: us.xlu?.rate || 0 },
       { name: '소재', chg: us.xlb?.rate || 0 },
       { name: '에너지', chg: us.xle?.rate || 0 },
-    ]
+    ].sort((a, b) => b.chg - a.chg)
   };
 
   saveData(finalData);
@@ -478,7 +482,7 @@ function scheduleAt(hour, minute, job) {
   log(`🕐 스케줄 등록: KST ${pad(hour)}:${pad(minute)}`);
 }
 
-log('🚀 MONEYLIVE 스케줄러 v5.4 시작');
+log('🚀 MONEYLIVE 스케줄러 v5.5 시작');
 log(`📁 저장경로: storage/data/ + storage/logs/`);
 log('스케줄: 15:00 토큰 / 15:35 / 18:05 / 06:05 / 07:55');
 
