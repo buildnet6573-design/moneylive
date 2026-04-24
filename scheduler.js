@@ -435,13 +435,18 @@ async function fetchUsData(prev, times) {
   };
   const results = {};
   let isUpdated = false;
-  await Promise.allSettled(Object.entries(symbols).map(async ([key, sym]) => {
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  
+  // Promise.all 대신 for...of 루프를 사용하여 순차적으로 300ms 간격 호출
+  for (const [key, sym] of Object.entries(symbols)) {
     const data = await fetchYahoo(sym);
     if(data) {
        results[key] = data;
        isUpdated = true;
     }
-  }));
+    await sleep(300); // 야후 봇 방어 시스템 우회용 딜레이
+  }
+  
   if (isUpdated) times.usData = getTimeStr();
   return results;
 }
@@ -453,27 +458,38 @@ async function collect() {
   log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   log('📡 데이터 수집 시작');
   
+  const systemStatus = { kis: '확인 중...', kr: '확인 중...', us: '확인 중...', crypto: '확인 중...' };
+
   const token = await getToken();
-  if (!token) { log('❌ 토큰 없음 - 수집 중단'); flushLog(); return; }
+  if (!token) { 
+    systemStatus.kis = 'ERROR';
+    log('❌ 토큰 없음 - 수집 중단'); 
+    flushLog(); return; 
+  }
+  systemStatus.kis = 'OK';
 
   const prev = loadPrevData();
-  
-  // 항목별 시간 기록 객체 초기화 (기존 기록 유지)
   const updateTimes = prev.updateTimes || {
     krIndex: '-', krSupply: '-', krProgram: '-', krDepth: '-', krEtf: '-', krSector: '-', krStock: '-', usData: '-', crypto: '-'
   };
 
-  const [krIndex, supply, program, depth, etf, sectors, stocks, us, crypto] = await Promise.all([
-    fetchIndex(token, prev, updateTimes),
-    fetchSupply(token, prev, updateTimes),
-    fetchProgram(token, prev, updateTimes),
-    fetchDepth(token, prev, updateTimes),
-    fetchKrEtf(token, prev, updateTimes),
-    fetchKrSectors(token, prev, updateTimes),
-    fetchKrStocks(token, prev, updateTimes),
-    fetchUsData(prev, updateTimes),
-    fetchCrypto(prev.crypto, updateTimes)
-  ]);
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  // Promise.all을 해제하고 0.5초 간격으로 순서대로 호출하여 초당 거래건수 제한(TPS) 방어
+  const krIndex = await fetchIndex(token, prev, updateTimes); await sleep(500);
+  const supply = await fetchSupply(token, prev, updateTimes); await sleep(500);
+  const program = await fetchProgram(token, prev, updateTimes); await sleep(500);
+  const depth = await fetchDepth(token, prev, updateTimes); await sleep(500);
+  const etf = await fetchKrEtf(token, prev, updateTimes); await sleep(500);
+  const sectors = await fetchKrSectors(token, prev, updateTimes); await sleep(500);
+  const stocks = await fetchKrStocks(token, prev, updateTimes); await sleep(500);
+  
+  const us = await fetchUsData(prev, updateTimes); await sleep(500);
+  const crypto = await fetchCrypto(prev.crypto, updateTimes);
+
+  systemStatus.kr = (krIndex.kospi && krIndex.kosdaq) ? 'OK' : 'ERROR';
+  systemStatus.us = Object.keys(us).length > 0 ? 'OK' : 'ERROR';
+  systemStatus.crypto = crypto ? 'OK' : 'ERROR';
 
   const pick = (newVal, prevVal) => newVal ? { value: newVal.value, change: newVal.change, rate: newVal.rate } : (prevVal||null);
   const prevUs    = prev.usIndex   || {};
@@ -483,7 +499,7 @@ async function collect() {
 
   const finalData = {
     time: kstNow().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }),
-    updateTimes: updateTimes, // 프론트 전달용 세부 업데이트 시간
+    updateTimes: updateTimes, 
     korea: krIndex, 
     supply: supply || prev.supply, 
     program: program || prev.program, 
@@ -520,7 +536,6 @@ async function collect() {
   if (supply) {
     const SUPPLY_FILE = path.join(DATA_DIR, 'supply.json');
     fs.writeFileSync(SUPPLY_FILE, JSON.stringify(supply, null, 2));
-    log(`✅ 수급 데이터(supply.json) 개별 저장 완료`);
   }
   
   log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
