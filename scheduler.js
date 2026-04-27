@@ -222,37 +222,53 @@ async function fetchUsData(prev, times) {
 async function fetchSupply(token, prev, times) {
   log('💰 수급 동향 수집 중 (KIS)...');
   try {
-    let r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market', token, 'FHPTJ04030000', { FID_COND_MRKT_DIV_CODE: 'U', FID_INPUT_ISCD: '0001' });
+    // ─── 1차: 장중 실시간 투자자 매매현황 (FID_INPUT_ISCD_2 필수 파라미터 추가)
+    let r = await kisGet(
+      '/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market',
+      token, 'FHPTJ04030000',
+      { FID_COND_MRKT_DIV_CODE: 'U', FID_INPUT_ISCD: '0001', FID_INPUT_ISCD_2: '0002' }
+    );
 
-    // ✅ 해결 1: output1이 없을 경우 output 배열을 사용하도록 안전하게 처리
-    let o = r.output1 || (Array.isArray(r.output) ? r.output[0] : r.output);
+    let o = r?.output1 || (Array.isArray(r?.output) ? r.output[0] : r?.output);
 
     if (!r || r.rt_cd !== '0' || !o) {
-      log(`  ⚠️ 기본 수급 API 거절 (rt_cd:${r?.rt_cd}, msg:${r?.msg1}) -> Fallback TR 호출`);
-      // Fallback: 투자자별 일별 매매현황 (장 마감 후에도 당일 확정 데이터 제공)
-      r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-by-market', token, 'FHPST02400000',
-        { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: '0001', FID_INPUT_DATE_1: getDate(0), FID_INPUT_DATE_2: getDate(0) });
-      if (!r || r.rt_cd !== '0' || !r.output || r.output.length === 0) {
-        log(`  ⚠️ Fallback API도 거절 (rt_cd:${r?.rt_cd}, msg:${r?.msg1})`);
-        throw new Error(`Fallback API도 거절됨`);
+      log(`  ⚠️ 장중 TR 거절 (rt_cd:${r?.rt_cd}, msg:${r?.msg1}) -> 일별 TR 시도`);
+
+      // ─── 2차: 장 마감 후 확정 데이터 — 시장별 투자자 일별 매매현황
+      // TR: FHKST01010900 / 경로: inquire-investor (종목별이지만 시장 전체 코드 0000 사용)
+      r = await kisGet(
+        '/uapi/domestic-stock/v1/quotations/inquire-investor',
+        token, 'FHKST01010900',
+        { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: '0000' }
+      );
+
+      if (!r || r.rt_cd !== '0' || !r.output) {
+        log(`  ⚠️ 일별 TR도 거절 (rt_cd:${r?.rt_cd}, msg:${r?.msg1})`);
+        throw new Error('일별 TR도 거절됨');
       }
-      
+
+      // output 배열에서 가장 최근 행 사용
       o = Array.isArray(r.output) ? r.output[0] : r.output;
-      // FHPST02400000 필드명: frgn_ntby_tr_pbmn(외국인), orgn_ntby_tr_pbmn(기관), prsn_ntby_tr_pbmn(개인) — 단위: 백만원
-      const ff = parseInt(o.frgn_ntby_tr_pbmn||0) * 1000000;
-      const fo = parseInt(o.orgn_ntby_tr_pbmn||0) * 1000000;
-      const fi = parseInt(o.prsn_ntby_tr_pbmn||0) * 1000000;
+      // 단위: 원
+      const ff = parseInt(o.frgn_ntby_tr_pbmn || 0);
+      const fo = parseInt(o.orgn_ntby_tr_pbmn  || 0);
+      const fi = parseInt(o.prsn_ntby_tr_pbmn  || 0);
       times.krSupply = getTimeStr();
       return buildSupplyResult({ foreign: ff, individual: fi, institution: fo }, prev);
     }
 
-    const f = parseInt(o.frgn_ntby_tr_pbmn || 0) / 100;
-    const ind = parseInt(o.prsn_ntby_tr_pbmn || 0) / 100;
-    const inst = parseInt(o.orgn_ntby_tr_pbmn || 0) / 100;
+    // ─── 1차 성공: output1 기준 (단위: 백원 → 원 변환)
+    const f    = parseInt(o.frgn_ntby_tr_pbmn || 0) * 100;
+    const ind  = parseInt(o.prsn_ntby_tr_pbmn || 0) * 100;
+    const inst = parseInt(o.orgn_ntby_tr_pbmn || 0) * 100;
 
-    if (f===0 && inst===0 && ind===0 && prev?.supply) return prev.supply;
+    if (f === 0 && inst === 0 && ind === 0 && prev?.supply) {
+      log('  ℹ️ 수급 값 전부 0 → 이전 데이터 유지');
+      return prev.supply;
+    }
     times.krSupply = getTimeStr();
     return buildSupplyResult({ foreign: f, individual: ind, institution: inst }, prev);
+
   } catch(e) {
     log(`  ⚠️ 수급 실패→이전유지: ${e.message}`);
     return prev?.supply || null;
