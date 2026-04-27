@@ -210,56 +210,38 @@ async function fetchUsData(prev, times) {
 }
 
 // ─────────────────────────────────────────────
-// 수급 결과 조립 헬퍼 (키 통일 + history 누적)
-// ─────────────────────────────────────────────
-/**
- * index.html이 기대하는 키: foreign / individual / institution / history
- * KIS API가 반환하는 키: frgn(외국인) / prsn(개인) / orgn(기관)
- * 이 함수에서 키를 통일하고, 최근 4 영업일치 history를 누적 저장한다.
- *
- * history 항목 구조: { date: 'YYYY-MM-DD', total: number }
- *   - total = foreign + individual + institution 합산 순매수(억 원)
- *   - index.html renderSupplyWeek()가 이 구조를 사용함
- */
-function buildSupplyResult(newVals, prev) {
-  const { foreign, individual, institution } = newVals;
-  const today = getDateStr(0);
-  const total  = foreign + individual + institution;
-
-  // 이전 history를 가져와 오늘 날짜 항목을 갱신(upsert)하고 최근 4일만 유지
-  const prevHistory = prev?.supply?.history || [];
-  const filtered    = prevHistory.filter(h => h.date !== today); // 오늘 항목 제거(중복 방지)
-  const history     = [...filtered, { date: today, total }]
-    .sort((a, b) => a.date.localeCompare(b.date)) // 오래된 순 정렬
-    .slice(-4);                                     // 최근 4일만 보관
-
-  return { foreign, individual, institution, history };
-}
-
-// ─────────────────────────────────────────────
 // 수집 모듈 (KIS)
 // ─────────────────────────────────────────────
 async function fetchSupply(token, prev, times) {
   log('💰 수급 동향 수집 중 (KIS)...');
   try {
-    let r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market', token, 'FHPTJ04030000', { FID_COND_MRKT_DIV_CODE: 'U', FID_INPUT_ISCD: '0001' });
+    // FID_INPUT_ISCD_2 필수 파라미터 추가 (누락 시 OPSQ2001 에러 발생)
+    let r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market', token, 'FHPTJ04030000', {
+      FID_COND_MRKT_DIV_CODE: 'U',
+      FID_INPUT_ISCD: '0001',
+      FID_INPUT_ISCD_2: '0001'
+    });
     
     if (!r || r.rt_cd !== '0' || !r.output1) {
-      log(`  ⚠️ 기본 수급 API 거절 -> Fallback TR 호출`);
-      r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-sector-trend', token, 'FHPUP02110000', { FID_COND_MRKT_DIV_CODE: 'U', FID_COND_SCR_DIV_CODE: '20211', FID_INPUT_ISCD: '0001' });
-      if (!r || r.rt_cd !== '0' || !r.output || r.output.length === 0) throw new Error(`Fallback API도 거절됨`);
+      log(`  ⚠️ 기본 수급 API 거절(${r?.msg_cd||'?'}:${r?.msg1||'?'}) -> Fallback TR 호출`);
+      r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-sector-trend', token, 'FHPUP02110000', {
+        FID_COND_MRKT_DIV_CODE: 'U',
+        FID_COND_SCR_DIV_CODE: '20211',
+        FID_INPUT_ISCD: '0001'
+      });
+      if (!r || r.rt_cd !== '0' || !r.output || r.output.length === 0) throw new Error(`Fallback API도 거절됨(${r?.msg_cd||'?'}:${r?.msg1||'?'})`);
       
       const o = r.output[0];
-      const ff = parseInt(o.frgn_ntby_tr_pbmn||0) * 10000;
-      const fi = parseInt(o.prsn_ntby_tr_pbmn||0) * 10000;
-      const fo = parseInt(o.orgn_ntby_tr_pbmn||0) * 10000;
+      const f   = parseInt(o.frgn_ntby_tr_pbmn||0) * 10000;
+      const ind  = parseInt(o.prsn_ntby_tr_pbmn||0) * 10000;
+      const inst = parseInt(o.orgn_ntby_tr_pbmn||0) * 10000;
       times.krSupply = getTimeStr();
-      return buildSupplyResult({ foreign: ff, individual: fi, institution: fo }, prev);
+      return buildSupplyResult({ foreign: f, individual: ind, institution: inst }, prev);
     }
 
     const o = r.output1;
-    const f = parseInt(o.frgn_ntby_tr_pbmn || 0) / 100;
-    const ind = parseInt(o.prsn_ntby_tr_pbmn || 0) / 100;
+    const f    = parseInt(o.frgn_ntby_tr_pbmn || 0) / 100;
+    const ind  = parseInt(o.prsn_ntby_tr_pbmn || 0) / 100;
     const inst = parseInt(o.orgn_ntby_tr_pbmn || 0) / 100;
 
     if (f===0 && inst===0 && ind===0 && prev?.supply) return prev.supply;
@@ -269,6 +251,18 @@ async function fetchSupply(token, prev, times) {
     log(`  ⚠️ 수급 실패→이전유지: ${e.message}`);
     return prev?.supply || null;
   }
+}
+
+// 수급 결과 조립: 키 통일(individual/institution) + history 누적(최근 4일)
+function buildSupplyResult(newVals, prev) {
+  const { foreign, individual, institution } = newVals;
+  const today  = getDateStr(0);
+  const total  = foreign + individual + institution;
+  const prevHistory = prev?.supply?.history || [];
+  const history = [...prevHistory.filter(h => h.date !== today), { date: today, total }]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-4);
+  return { foreign, individual, institution, history };
 }
 
 async function fetchProgram(token, prev, times) {
