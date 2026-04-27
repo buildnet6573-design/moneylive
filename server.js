@@ -1,51 +1,56 @@
 const express = require('express');
-const cors = require('cors');
+const fs = require('fs');
 const path = require('path');
-const scheduler = require('./scheduler'); 
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const DATA_FILE = path.join(__dirname, 'data.json');
 
-// 미들웨어 설정
-app.use(cors());
-app.use(express.static(path.join(__dirname, 'public'))); // index.html 파일이 있는 폴더 지정
+// 서버 메모리 캐시 (에러 발생 시 프론트엔드 화면 깨짐 방어용)
+let memoryCache = null;
 
-// 서버 메모리 캐시 (API 오류 시 방어용)
-let fallbackCacheData = {
-    updatedAt: "데이터 수집 대기중...",
-    stocks: {
-        volume: [], foreignBuy: [], instBuy: [], indvBuy: []
-    }
-};
+// 정적 파일 서빙 (index.html)
+app.use(express.static(__dirname));
 
-// 프론트엔드 데이터 요청 API
+// /api/data → 스케줄러가 저장한 data.json 반환
 app.get('/api/data', (req, res) => {
-    try {
-        const latestData = scheduler.getLatestData();
-        
-        // 스케줄러에서 정상적인 데이터를 가져왔다면 캐시 업데이트
-        if (latestData && Object.keys(latestData).length > 0) {
-            fallbackCacheData = latestData;
-            res.json(latestData);
-        } else {
-            // 빈 객체이거나 에러 상태라면 마지막 정상 캐시 반환
-            res.json(fallbackCacheData);
-        }
-    } catch (error) {
-        console.error("API 라우터 에러 발생:", error);
-        // 서버 내부 오류 시에도 시스템 중단 없이 캐시 데이터 전송
-        res.json(fallbackCacheData);
+  try {
+    if (!fs.existsSync(DATA_FILE)) {
+      if (memoryCache) {
+        res.setHeader('Cache-Control', 'no-cache');
+        return res.json(memoryCache);
+      }
+      return res.status(503).json({ error: '아직 데이터가 수집되지 않았어요. 잠시 후 다시 시도해주세요.' });
     }
+    
+    const raw = fs.readFileSync(DATA_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    
+    // 정상 로드 시 메모리 캐시 갱신
+    memoryCache = data;
+    
+    res.setHeader('Cache-Control', 'no-cache');
+    res.json(data);
+  } catch (e) {
+    console.error('[server] data.json 읽기 실패:', e.message);
+    // 에러 발생 시 메모리 캐시가 남아있다면 서버를 멈추지 않고 안전하게 캐시 전송
+    if (memoryCache) {
+      res.setHeader('Cache-Control', 'no-cache');
+      res.json(memoryCache);
+    } else {
+      res.status(500).json({ error: '데이터 읽기 실패' });
+    }
+  }
 });
 
-// 메인 페이지 라우팅
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// 헬스체크
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
-// 서버 실행
 app.listen(PORT, () => {
-    console.log(`🚀 MONEYLIVE 서버가 포트 ${PORT}에서 실행 중입니다.`);
-    // 서버 가동 시 스케줄러 초기화 및 즉시 실행
-    scheduler.init(); 
+  console.log(`[server] MONEYLIVE 서버 시작 → http://localhost:${PORT}`);
+
+  // 서버 시작 시 스케줄러도 함께 실행
+  require('./scheduler');
 });
