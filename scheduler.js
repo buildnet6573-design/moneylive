@@ -215,33 +215,27 @@ async function fetchUsData(prev, times) {
 async function fetchSupply(token, prev, times) {
   log('💰 수급 동향 수집 중 (KIS)...');
   try {
-    // FID_INPUT_ISCD_2 필수 파라미터 추가 (누락 시 OPSQ2001 에러 발생)
-    let r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market', token, 'FHPTJ04030000', {
-      FID_COND_MRKT_DIV_CODE: 'U',
-      FID_INPUT_ISCD: '0001',
-      FID_INPUT_ISCD_2: '0001'
-    });
-    
-    if (!r || r.rt_cd !== '0' || !r.output1) {
-      log(`  ⚠️ 기본 수급 API 거절(${r?.msg_cd||'?'}:${r?.msg1||'?'}) -> Fallback TR 호출`);
-      r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-sector-trend', token, 'FHPUP02110000', {
-        FID_COND_MRKT_DIV_CODE: 'U',
-        FID_COND_SCR_DIV_CODE: '20211',
-        FID_INPUT_ISCD: '0001'
-      });
-      if (!r || r.rt_cd !== '0' || !r.output || r.output.length === 0) throw new Error(`Fallback API도 거절됨(${r?.msg_cd||'?'}:${r?.msg1||'?'})`);
+    let r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market', token, 'FHPTJ04030000', { FID_COND_MRKT_DIV_CODE: 'U', FID_INPUT_ISCD: '0001' });
+
+    // ✅ 해결 1: output1이 없을 경우 output 배열을 사용하도록 안전하게 처리
+    let o = r.output1 || (Array.isArray(r.output) ? r.output[0] : r.output);
+
+    if (!r || r.rt_cd !== '0' || !o) {
+      log(`  ⚠️ 기본 수급 API 거절 -> Fallback TR 호출`);
+      // ✅ 해결 2: Fallback API URL 오타 수정 (-trend 제거)
+      r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-sector', token, 'FHPUP02110000', { FID_COND_MRKT_DIV_CODE: 'U', FID_COND_SCR_DIV_CODE: '20211', FID_INPUT_ISCD: '0001' });
+      if (!r || r.rt_cd !== '0' || !r.output || r.output.length === 0) throw new Error(`Fallback API도 거절됨`);
       
-      const o = r.output[0];
-      const f   = parseInt(o.frgn_ntby_tr_pbmn||0) * 10000;
-      const ind  = parseInt(o.prsn_ntby_tr_pbmn||0) * 10000;
-      const inst = parseInt(o.orgn_ntby_tr_pbmn||0) * 10000;
+      o = Array.isArray(r.output) ? r.output[0] : r.output;
+      const ff = parseInt(o.frgn_ntby_tr_pbmn||0) * 10000;
+      const fi = parseInt(o.prsn_ntby_tr_pbmn||0) * 10000;
+      const fo = parseInt(o.orgn_ntby_tr_pbmn||0) * 10000;
       times.krSupply = getTimeStr();
-      return buildSupplyResult({ foreign: f, individual: ind, institution: inst }, prev);
+      return buildSupplyResult({ foreign: ff, individual: fi, institution: fo }, prev);
     }
 
-    const o = r.output1;
-    const f    = parseInt(o.frgn_ntby_tr_pbmn || 0) / 100;
-    const ind  = parseInt(o.prsn_ntby_tr_pbmn || 0) / 100;
+    const f = parseInt(o.frgn_ntby_tr_pbmn || 0) / 100;
+    const ind = parseInt(o.prsn_ntby_tr_pbmn || 0) / 100;
     const inst = parseInt(o.orgn_ntby_tr_pbmn || 0) / 100;
 
     if (f===0 && inst===0 && ind===0 && prev?.supply) return prev.supply;
