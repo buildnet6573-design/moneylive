@@ -774,8 +774,8 @@ async function loadAll(){
 
     if(d.supply){
       const f=setSupplyVal('foreign',d.supply.foreign)||0;
-      const inst=setSupplyVal('institution',d.supply.institution)||0;
-      const ind=setSupplyVal('individual',d.supply.individual)||0;
+      const inst=setSupplyVal('institution',d.supply.organ)||0; // 수정됨
+      const ind=setSupplyVal('individual',d.supply.person)||0;  // 수정됨
       renderSupplySummary(f,inst,ind);
       renderSupplyWeek((d.supply.history||[]),f+inst+ind);
     }
