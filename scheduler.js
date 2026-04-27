@@ -1,9 +1,9 @@
 /**
- * MONEYLIVE 스케줄러 v5.7 (휴장일 방어 및 캐싱 최적화)
+ * MONEYLIVE 스케줄러 v5.6 (정밀 데이터 교정 및 ETF 필터링)
  * 업데이트 내역:
- * - 한투 API 휴장일 방어: 주말(토/일) 및 공휴일 KIS 토큰 발급 및 수집 자동 차단
- * - 거래대금 TOP 10 및 수급 정렬 오류 완벽 해결 (금액 기준 내림차순 강제 보장)
- * - 기존 v5.6 기능 (ETF 필터링, 개인 수급, 섹터 대장주) 완벽 유지
+ * - 거래대금 TOP 10: ETF/ETN/선물 완벽 필터링 및 실제 거래금액 기준 정렬
+ * - 개인 수급 추가: 외국인/기관 외에 개인(코드 3) 순매수/순매도 조회 로직 반영
+ * - 섹터 데이터: 대장주 기반 안정성 확보 및 툴팁용 '대표종목' 텍스트(reps) 추가
  * - 모든 데이터 배열 내림차순 강제 정렬 보장
  */
 
@@ -22,27 +22,6 @@ const TOKEN_FILE  = path.join(__dirname, 'token.json');
 
 const APP_KEY    = process.env.KIS_APP_KEY;
 const APP_SECRET = process.env.KIS_APP_SECRET;
-
-// ─────────────────────────────────────────────
-// 휴장일 설정 (한국투자증권 API 차단용)
-// ─────────────────────────────────────────────
-// 휴장일(대체공휴일, 선거일 등)을 'YYYY-MM-DD' 형식으로 추가하시면 해당 일에는 한투 API를 호출하지 않습니다.
-const HOLIDAYS = [
-  '2026-05-05', // 어린이날 예시
-  '2026-09-23', // 추석 연휴 예시
-  '2026-12-25'  // 성탄절 예시
-];
-
-function isTradingDay() {
-  const now = kstNow();
-  const kstDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-  const day = now.getDay();
-  
-  if (day === 0 || day === 6) return false; // 주말 차단
-  if (HOLIDAYS.includes(kstDate)) return false; // 공휴일 차단
-  
-  return true;
-}
 
 // ─────────────────────────────────────────────
 // 유틸
@@ -231,6 +210,33 @@ async function fetchUsData(prev, times) {
 }
 
 // ─────────────────────────────────────────────
+// 수급 결과 조립 헬퍼 (키 통일 + history 누적)
+// ─────────────────────────────────────────────
+/**
+ * index.html이 기대하는 키: foreign / individual / institution / history
+ * KIS API가 반환하는 키: frgn(외국인) / prsn(개인) / orgn(기관)
+ * 이 함수에서 키를 통일하고, 최근 4 영업일치 history를 누적 저장한다.
+ *
+ * history 항목 구조: { date: 'YYYY-MM-DD', total: number }
+ *   - total = foreign + individual + institution 합산 순매수(억 원)
+ *   - index.html renderSupplyWeek()가 이 구조를 사용함
+ */
+function buildSupplyResult(newVals, prev) {
+  const { foreign, individual, institution } = newVals;
+  const today = getDateStr(0);
+  const total  = foreign + individual + institution;
+
+  // 이전 history를 가져와 오늘 날짜 항목을 갱신(upsert)하고 최근 4일만 유지
+  const prevHistory = prev?.supply?.history || [];
+  const filtered    = prevHistory.filter(h => h.date !== today); // 오늘 항목 제거(중복 방지)
+  const history     = [...filtered, { date: today, total }]
+    .sort((a, b) => a.date.localeCompare(b.date)) // 오래된 순 정렬
+    .slice(-4);                                     // 최근 4일만 보관
+
+  return { foreign, individual, institution, history };
+}
+
+// ─────────────────────────────────────────────
 // 수집 모듈 (KIS)
 // ─────────────────────────────────────────────
 async function fetchSupply(token, prev, times) {
@@ -244,12 +250,11 @@ async function fetchSupply(token, prev, times) {
       if (!r || r.rt_cd !== '0' || !r.output || r.output.length === 0) throw new Error(`Fallback API도 거절됨`);
       
       const o = r.output[0];
+      const ff = parseInt(o.frgn_ntby_tr_pbmn||0) * 10000;
+      const fi = parseInt(o.prsn_ntby_tr_pbmn||0) * 10000;
+      const fo = parseInt(o.orgn_ntby_tr_pbmn||0) * 10000;
       times.krSupply = getTimeStr();
-      return { 
-        foreign: parseInt(o.frgn_ntby_tr_pbmn||0) * 10000, 
-        person: parseInt(o.prsn_ntby_tr_pbmn||0) * 10000, 
-        organ: parseInt(o.orgn_ntby_tr_pbmn||0) * 10000 
-      };
+      return buildSupplyResult({ foreign: ff, individual: fi, institution: fo }, prev);
     }
 
     const o = r.output1;
@@ -259,7 +264,7 @@ async function fetchSupply(token, prev, times) {
 
     if (f===0 && inst===0 && ind===0 && prev?.supply) return prev.supply;
     times.krSupply = getTimeStr();
-    return { foreign: f, person: ind, organ: inst };
+    return buildSupplyResult({ foreign: f, individual: ind, institution: inst }, prev);
   } catch(e) {
     log(`  ⚠️ 수급 실패→이전유지: ${e.message}`);
     return prev?.supply || null;
@@ -293,7 +298,7 @@ async function fetchDepth(token, prev, times) {
 }
 
 // ─────────────────────────────────────────────
-// KR 섹터 
+// KR 섹터 (대장주 기반 절대 안정성 + 툴팁 텍스트 제공)
 // ─────────────────────────────────────────────
 async function fetchKrSectors(token, prev, times) {
   log('📊 KR 섹터 수집 중 (KIS)...');
@@ -317,6 +322,7 @@ async function fetchKrSectors(token, prev, times) {
   
   for (const s of sectors) {
     try {
+      // 절대 실패하지 않는 주식 현재가 범용 API 사용
       const r = await kisGet(
         '/uapi/domestic-stock/v1/quotations/inquire-price', 
         token, 'FHKST01010100', 
@@ -327,8 +333,8 @@ async function fetchKrSectors(token, prev, times) {
          results.push({ 
            name: s.name, 
            chg: parseFloat(r.output.prdy_ctrt||0),
-           vol: Math.round(parseInt(r.output.acml_tr_pbmn||0) / 100000000), 
-           reps: s.reps 
+           vol: Math.round(parseInt(r.output.acml_tr_pbmn||0) / 100000000), // 원 -> 억 단위
+           reps: s.reps // 프론트엔드 툴팁 매핑용 문자열
          });
          isUpdated = true;
       }
@@ -339,14 +345,14 @@ async function fetchKrSectors(token, prev, times) {
   if (isUpdated) times.krSector = getTimeStr();
   
   if (results.length > 0) {
-    results.sort((a, b) => b.chg - a.chg); 
+    results.sort((a, b) => b.chg - a.chg); // 등락률 기준 완벽 정렬 보장
     return results;
   }
   return prev?.sectors || null;
 }
 
 // ─────────────────────────────────────────────
-// KR 종목 순위 (정렬 오류 완벽 해결)
+// KR 종목 순위 (ETF 완벽 제거 및 개인 수급 포함)
 // ─────────────────────────────────────────────
 async function fetchKrStocks(token, prev, times) {
   log('📋 KR 순위 종목 수집 중 (KIS)...');
@@ -359,6 +365,7 @@ async function fetchKrStocks(token, prev, times) {
     
     const volumeRaw = volRes?.output || [];
     
+    // 1. ETF, ETN, 인버스, 레버리지 완벽 필터링 후 2. 누적거래대금(acml_tr_pbmn) 기준으로 진짜 TOP 10 추출
     const volume = volumeRaw
       .filter(s => !/KODEX|TIGER|KBSTAR|ACE|ARIRANG|HANARO|KOSEF|ETN|선물|인버스|레버리지/i.test(s.hts_kor_isnm))
       .sort((a, b) => parseInt(b.acml_tr_pbmn||0) - parseInt(a.acml_tr_pbmn||0))
@@ -376,17 +383,7 @@ async function fetchKrStocks(token, prev, times) {
       try {
         const r = await kisGet('/uapi/domestic-stock/v1/quotations/foreign-institution-total', token, 'FHPTJ04400000',
           { FID_COND_MRKT_DIV_CODE: 'V', FID_COND_SCR_DIV_CODE: '16449', FID_INPUT_ISCD: '0001', FID_DIV_CLS_CODE: '0', FID_RANK_SORT_CLS_CODE: String(rankSort), FID_ETC_CLS_CODE: String(etcCls) });
-        
-        let list = r?.output || [];
-        
-        // 데이터 누락 및 정렬 꼬임 방지를 위해 금액 기준으로 내림차순 정렬 강제 적용
-        list.sort((a, b) => {
-           const valA = Math.abs(parseInt(a.ntby_tr_pbmn || a.frgn_ntby_tr_pbmn || 0));
-           const valB = Math.abs(parseInt(b.ntby_tr_pbmn || b.frgn_ntby_tr_pbmn || 0));
-           return valB - valA;
-        });
-
-        return list.slice(0,5).map(s => ({ 
+        return (r?.output||[]).slice(0,5).map(s => ({ 
           name: s.hts_kor_isnm, code: s.mksc_shrn_iscd, 
           chg: parseFloat(s.prdy_ctrt||0), 
           amt: Math.round(parseInt(s.ntby_tr_pbmn||s.frgn_ntby_tr_pbmn||0) / 100000000) 
@@ -394,12 +391,13 @@ async function fetchKrStocks(token, prev, times) {
       } catch(e) { return null; }
     };
 
+    // 1:외국인, 2:기관, 3:개인 순차 호출
     const fB = await fetchRank(1, 0); await sleep(800);
     const fS = await fetchRank(1, 1); await sleep(800);
     const iB = await fetchRank(2, 0); await sleep(800);
     const iS = await fetchRank(2, 1); await sleep(800);
-    const pB = await fetchRank(3, 0); await sleep(800); 
-    const pS = await fetchRank(3, 1); 
+    const pB = await fetchRank(3, 0); await sleep(800); // 개인 순매수 상위
+    const pS = await fetchRank(3, 1); // 개인 순매도 상위
 
     if (isUpdated) times.krStock = getTimeStr();
     return {
@@ -426,31 +424,22 @@ async function collect() {
   
   const systemStatus = { kis: '확인 중...', kr: '확인 중...', us: '확인 중...', crypto: '확인 중...' };
 
-  const isTrading = isTradingDay();
-  const token = isTrading ? await getToken() : null;
-
-  if (!isTrading) {
-    systemStatus.kis = 'SKIPPED';
-    log('💤 주말/휴장일 - KIS(한투) 수집 스킵 (기존 데이터 유지)');
-  } else if (!token) { 
-    systemStatus.kis = 'ERROR'; 
-    log('❌ 토큰 없음 - KIS 수집 중단'); 
-  } else { 
-    systemStatus.kis = 'OK'; 
-  }
+  const token = await getToken();
+  if (!token) { systemStatus.kis = 'ERROR'; log('❌ 토큰 없음 - KIS 수집 중단'); } 
+  else { systemStatus.kis = 'OK'; }
 
   const prev = loadPrevData();
   const updateTimes = prev.updateTimes || { krIndex: '-', krSupply: '-', krProgram: '-', krDepth: '-', krEtf: '-', krSector: '-', krStock: '-', usData: '-', crypto: '-' };
 
-  // 1. Yahoo & CoinGecko 수집 (토큰 불필요, 주말에도 수집 가능)
+  // 1. Yahoo & CoinGecko 수집 (토큰 불필요)
   const krIndex = await fetchIndex(prev, updateTimes); await sleep(1000);
   const etf = await fetchKrEtf(prev, updateTimes); await sleep(1000);
   const us = await fetchUsData(prev, updateTimes); await sleep(1000);
   const crypto = await fetchCrypto(prev.crypto, updateTimes); await sleep(1000);
 
-  // 2. KIS 수집 (토큰 필요, 영업일에만 실행)
+  // 2. KIS 수집 (토큰 필요)
   let supply, program, depth, sectors, stocks;
-  if (token && isTrading) {
+  if (token) {
     supply = await fetchSupply(token, prev, updateTimes); await sleep(1000);
     program = await fetchProgram(token, prev, updateTimes); await sleep(1000);
     depth = await fetchDepth(token, prev, updateTimes); await sleep(1000);
@@ -551,16 +540,11 @@ function scheduleAt(hour, minute, job) {
   log(`🕐 스케줄 등록: KST ${pad(hour)}:${pad(minute)}`);
 }
 
-log('🚀 MONEYLIVE 스케줄러 v5.7 시작');
+log('🚀 MONEYLIVE 스케줄러 v5.6 시작');
 log(`📁 저장경로: storage/data/ + storage/logs/`);
 log('스케줄: 15:00 토큰 / 15:35 / 18:05 / 06:05 / 07:55');
 
-scheduleAt(15,  0, async () => { 
-  if (!isTradingDay()) return; 
-  log('[15:00] 토큰 발급'); 
-  await getToken(); // 기존 issueToken() 에서 선언된 getToken() 으로 수정 
-  flushLog(); 
-});
+scheduleAt(15,  0, async () => { log('[15:00] 토큰 발급'); await issueToken(); flushLog(); });
 scheduleAt(15, 35, () => { log('[15:35] 1차 수집'); collect(); });
 scheduleAt(18,  5, () => { log('[18:05] 2차 수집'); collect(); });
 scheduleAt( 6,  5, () => { log('[06:05] 3차 수집'); collect(); });
