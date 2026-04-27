@@ -146,7 +146,7 @@
   </div>
 
   <div class="tab-content active" id="tab-0">
-    <div class="global-update-time">최종 업데이트: <span class="update-time-val">-</span></div>
+    <div class="global-update-time">최종 업데이트: <span class="update-time-val" id="utime-0">-</span></div>
 
     <div class="section-label">지수</div>
     <div class="card">
@@ -240,7 +240,7 @@
   </div>
 
   <div class="tab-content" id="tab-1">
-    <div class="global-update-time">최종 업데이트: <span class="update-time-val">-</span></div>
+    <div class="global-update-time">최종 업데이트: <span class="update-time-val" id="utime-1">-</span></div>
     <div class="section-label">섹터별 등락률</div>
     <div class="card">
       <div class="sector-thead"><span class="sector-rank"></span><span style="flex:1;font-size:10px;font-weight:700;color:var(--text2);">섹터</span><span style="width:74px;text-align:right;font-size:10px;font-weight:700;color:var(--text2);">등락률</span><span style="width:76px;text-align:right;font-size:10px;font-weight:700;color:var(--text2);">거래대금 (▼)</span></div>
@@ -264,7 +264,7 @@
   </div>
 
   <div class="tab-content" id="tab-2">
-    <div class="global-update-time">최종 업데이트: <span class="update-time-val">-</span></div>
+    <div class="global-update-time">최종 업데이트: <span class="update-time-val" id="utime-2">-</span></div>
     <div class="section-label">지수</div>
     <div class="cards-grid">
       <div class="card-grid-item"><div class="card-label-row"><span class="card-label">S&P 500 <span class="code">(^GSPC)</span></span><button class="info-btn" onclick="toggleTip('t-sp', event)">?</button></div><div class="tooltip" id="t-sp">미국 대형주 500개를 모은 지수예요. 미국 경제 전체의 흐름을 보는 가장 대표적인 지표예요.</div><div class="card-value loading" id="sp500">-</div><div class="card-change" id="sp500-chg">-</div></div>
@@ -297,7 +297,7 @@
   </div>
 
   <div class="tab-content" id="tab-3">
-    <div class="global-update-time">최종 업데이트: <span class="update-time-val">-</span></div>
+    <div class="global-update-time">최종 업데이트: <span class="update-time-val" id="utime-3">-</span></div>
     <div class="section-label">S&P 500 섹터별 등락률</div>
     <div class="card">
       <div class="sector-thead"><span class="sector-rank"></span><span style="flex:1;font-size:10px;font-weight:700;color:var(--text2);">섹터</span><span style="width:74px;text-align:right;font-size:10px;font-weight:700;color:var(--text2);">등락률</span><span style="width:50px;text-align:right;font-size:10px;font-weight:700;color:var(--text2);">ETF</span></div>
@@ -362,7 +362,7 @@
   </div>
 
   <div class="tab-content" id="tab-4">
-    <div class="global-update-time">최종 업데이트: <span class="update-time-val">-</span></div>
+    <div class="global-update-time">최종 업데이트: <span class="update-time-val" id="utime-4">-</span></div>
     <div class="section-label">암호화폐</div>
     <div class="card">
       <div class="asset-row">
@@ -408,7 +408,7 @@
   </div>
 
   <div class="tab-content" id="tab-5">
-    <div class="global-update-time">최종 업데이트: <span class="update-time-val">-</span></div>
+    <div class="global-update-time">최종 업데이트: <span class="update-time-val" id="utime-5">-</span></div>
     
     <div class="section-label">방문자 현황</div>
     <div class="visitor-card">
@@ -761,21 +761,27 @@ async function loadAll(){
   if(d){
     // 에러 객체가 넘어오면 화면을 리셋하지 않고 대기합니다.
     if(d.error) {
-      document.querySelectorAll('.update-time-val').forEach(el => el.textContent = '데이터를 불러오는 중입니다...');
+      [0,1,2,3,4,5].forEach(i => { const el = document.getElementById('utime-'+i); if(el) el.textContent = '데이터를 불러오는 중입니다...'; });
       return; 
     }
 
-    // d.updatedAt이 아니라 서버에서 만들어주는 원본 시간값인 d.time으로 연동!
-    const updateTimeText = d.time || fmtKstTime();
-    document.querySelectorAll('.update-time-val').forEach(el => el.textContent = updateTimeText);
+    // 탭별 업데이트 시간 — 각 탭의 데이터 기준에 맞는 수집 시간 표시
+    const ut = d.updateTimes || {};
+    const setUtime = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val || d.time || '-'; };
+    setUtime('utime-0', ut.krIndex);          // 국내: 지수 수집 시간
+    setUtime('utime-1', ut.krSector);         // KR섹터: 섹터 수집 시간
+    setUtime('utime-2', ut.usData);           // 미국: 미국 데이터 수집 시간
+    setUtime('utime-3', ut.usData);           // US섹터: 미국 데이터 수집 시간
+    setUtime('utime-4', ut.usData);           // 글로벌: 미국 데이터 수집 시간
+    setUtime('utime-5', d.time || '-');       // 패치: 전체 수집 완료 시간
 
     if(d.kospi?.value) renderWeek('kospi-week','kospi-td','kospi-v','kospi-c',(d.kospi.history||[]).slice(0,4),d.kospi.value,d.kospi.change);
     if(d.kosdaq?.value) renderWeek('kosdaq-week','kosdaq-td','kosdaq-v','kosdaq-c',(d.kosdaq.history||[]).slice(0,4),d.kosdaq.value,d.kosdaq.change);
 
     if(d.supply){
       const f=setSupplyVal('foreign',d.supply.foreign)||0;
-      const inst=setSupplyVal('institution',d.supply.institution)||0; // 수정됨
-      const ind=setSupplyVal('individual',d.supply.individual)||0;  // 수정됨
+      const inst=setSupplyVal('institution',d.supply.organ)||0; // 수정됨
+      const ind=setSupplyVal('individual',d.supply.person)||0;  // 수정됨
       renderSupplySummary(f,inst,ind);
       renderSupplyWeek((d.supply.history||[]),f+inst+ind);
     }
