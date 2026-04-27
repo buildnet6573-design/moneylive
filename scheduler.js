@@ -92,7 +92,14 @@ function kisGet(apiPath, token, trId, params = {}) {
       headers: { 'content-type': 'application/json; charset=utf-8', 'authorization': `Bearer ${token}`, 'appkey': APP_KEY, 'appsecret': APP_SECRET, 'tr_id': trId, 'custtype': 'P' }
     }, (res) => {
       let data = ''; res.on('data', c => data += c);
-      res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(new Error('JSON 파싱실패')); } });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch(e) {
+          // 원본 응답 앞 300자 로그 출력 → 어떤 응답이 오는지 즉시 확인 가능
+          console.error(`[kisGet 파싱실패] TR:${trId} 원본응답:`, data.substring(0, 300));
+          reject(new Error('JSON 파싱실패'));
+        }
+      });
     }).on('error', reject);
   });
 }
@@ -221,15 +228,20 @@ async function fetchSupply(token, prev, times) {
     let o = r.output1 || (Array.isArray(r.output) ? r.output[0] : r.output);
 
     if (!r || r.rt_cd !== '0' || !o) {
-      log(`  ⚠️ 기본 수급 API 거절 -> Fallback TR 호출`);
-      // ✅ 해결 2: Fallback API URL 오타 수정 (-trend 제거)
-      r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-sector', token, 'FHPUP02110000', { FID_COND_MRKT_DIV_CODE: 'U', FID_COND_SCR_DIV_CODE: '20211', FID_INPUT_ISCD: '0001' });
-      if (!r || r.rt_cd !== '0' || !r.output || r.output.length === 0) throw new Error(`Fallback API도 거절됨`);
+      log(`  ⚠️ 기본 수급 API 거절 (rt_cd:${r?.rt_cd}, msg:${r?.msg1}) -> Fallback TR 호출`);
+      // Fallback: 투자자별 일별 매매현황 (장 마감 후에도 당일 확정 데이터 제공)
+      r = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor-by-market', token, 'FHPST02400000',
+        { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: '0001', FID_INPUT_DATE_1: getDate(0), FID_INPUT_DATE_2: getDate(0) });
+      if (!r || r.rt_cd !== '0' || !r.output || r.output.length === 0) {
+        log(`  ⚠️ Fallback API도 거절 (rt_cd:${r?.rt_cd}, msg:${r?.msg1})`);
+        throw new Error(`Fallback API도 거절됨`);
+      }
       
       o = Array.isArray(r.output) ? r.output[0] : r.output;
-      const ff = parseInt(o.frgn_ntby_tr_pbmn||0) * 10000;
-      const fi = parseInt(o.prsn_ntby_tr_pbmn||0) * 10000;
-      const fo = parseInt(o.orgn_ntby_tr_pbmn||0) * 10000;
+      // FHPST02400000 필드명: frgn_ntby_tr_pbmn(외국인), orgn_ntby_tr_pbmn(기관), prsn_ntby_tr_pbmn(개인) — 단위: 백만원
+      const ff = parseInt(o.frgn_ntby_tr_pbmn||0) * 1000000;
+      const fo = parseInt(o.orgn_ntby_tr_pbmn||0) * 1000000;
+      const fi = parseInt(o.prsn_ntby_tr_pbmn||0) * 1000000;
       times.krSupply = getTimeStr();
       return buildSupplyResult({ foreign: ff, individual: fi, institution: fo }, prev);
     }
@@ -532,7 +544,7 @@ log('🚀 MONEYLIVE 스케줄러 v5.6 시작');
 log(`📁 저장경로: storage/data/ + storage/logs/`);
 log('스케줄: 15:00 토큰 / 15:35 / 18:05 / 06:05 / 07:55');
 
-scheduleAt(15,  0, async () => { log('[15:00] 토큰 발급'); await getToken(); flushLog(); });
+scheduleAt(15,  0, async () => { log('[15:00] 토큰 발급'); await issueToken(); flushLog(); });
 scheduleAt(15, 35, () => { log('[15:35] 1차 수집'); collect(); });
 scheduleAt(18,  5, () => { log('[18:05] 2차 수집'); collect(); });
 scheduleAt( 6,  5, () => { log('[06:05] 3차 수집'); collect(); });
