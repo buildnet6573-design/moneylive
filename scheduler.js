@@ -532,7 +532,7 @@ log('🚀 MONEYLIVE 스케줄러 v5.6 시작');
 log(`📁 저장경로: storage/data/ + storage/logs/`);
 log('스케줄: 15:00 토큰 / 15:35 / 18:05 / 06:05 / 07:55');
 
-scheduleAt(15,  0, async () => { log('[15:00] 토큰 발급'); await issueToken(); flushLog(); });
+scheduleAt(15,  0, async () => { log('[15:00] 토큰 발급'); await getToken(); flushLog(); });
 scheduleAt(15, 35, () => { log('[15:35] 1차 수집'); collect(); });
 scheduleAt(18,  5, () => { log('[18:05] 2차 수집'); collect(); });
 scheduleAt( 6,  5, () => { log('[06:05] 3차 수집'); collect(); });
