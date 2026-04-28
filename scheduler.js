@@ -319,15 +319,7 @@ async function fetchDepth(token, prev, times) {
 async function fetchKrSectors(token, prev, times) {
   log('📊 KR 섹터 수집 중 (KIS)...');
 
-  // 장 마감 확정 데이터는 15:30~18:30 사이 수집분만 유효
-  // 그 외 시간(07:55 등)에는 chg/vol이 0으로 내려오므로 이전 데이터 유지
-  const h = kstNow().getHours();
-  const m = kstNow().getMinutes();
-  const isValidTime = (h === 15 && m >= 30) || (h === 16) || (h === 17) || (h === 18 && m <= 30);
-  if (!isValidTime && prev?.sectors?.length) {
-    log('  ℹ️ 장 마감 시간 외 → 섹터 이전 데이터 유지');
-    return prev.sectors;
-  }
+  // 시간 제한 없이 항상 최신 데이터 수집
   
   const sectors = [
     { code: '005930', name: '반도체/IT', reps: '대표종목: 삼성전자, SK하이닉스, 한미반도체 등' },
@@ -384,14 +376,7 @@ async function fetchKrStocks(token, prev, times) {
   log('📋 KR 순위 종목 수집 중 (KIS)...');
   const prevStocks = prev?.stocks || {};
 
-  // 장 마감 확정 데이터는 15:30~18:30 사이 수집분만 유효
-  const h = kstNow().getHours();
-  const m = kstNow().getMinutes();
-  const isValidTime = (h === 15 && m >= 30) || (h === 16) || (h === 17) || (h === 18 && m <= 30);
-  if (!isValidTime && prevStocks.volume?.length) {
-    log('  ℹ️ 장 마감 시간 외 → 종목 순위 이전 데이터 유지');
-    return prevStocks;
-  }
+  // 시간 제한 없이 항상 최신 데이터 수집
 
   let isUpdated = false;
 
@@ -427,12 +412,24 @@ async function fetchKrStocks(token, prev, times) {
         const r = await kisGet('/uapi/domestic-stock/v1/quotations/foreign-institution-total', token, 'FHPTJ04400000',
           { FID_COND_MRKT_DIV_CODE: 'V', FID_COND_SCR_DIV_CODE: '16449', FID_INPUT_ISCD: '0001', FID_DIV_CLS_CODE: '0', FID_RANK_SORT_CLS_CODE: String(rankSort), FID_ETC_CLS_CODE: String(etcCls) });
         const field = AMT_FIELD[etcCls] || 'ntby_tr_pbmn';
-        return (r?.output||[]).slice(0,5).map(s => ({ 
-          name: s.hts_kor_isnm, code: s.mksc_shrn_iscd, 
-          chg: parseFloat(s.prdy_ctrt||0), 
-          amt: Math.round(parseInt(s[field] || s.ntby_tr_pbmn || 0) / 100000000)
-        }));
-      } catch(e) { return null; }
+        
+        // ── 디버그: 첫 번째 레코드의 필드를 로그로 확인
+        if (r?.output?.length) {
+          const sample = r.output[0];
+          log(`  [fetchRank] etcCls=${etcCls} sort=${rankSort} field=${field} val=${sample[field]} ntby=${sample.ntby_tr_pbmn} keys=${Object.keys(sample).filter(k=>k.includes('ntby')).join(',')}`);
+        }
+        
+        return (r?.output||[]).slice(0,5).map(s => {
+          // 투자자별 필드 → 공통 필드 → 0 순서로 폴백
+          const rawAmt = s[field] ?? s.ntby_tr_pbmn ?? s.frgn_ntby_tr_pbmn ?? s.orgn_ntby_tr_pbmn ?? s.prsn_ntby_tr_pbmn ?? '0';
+          return { 
+            name: s.hts_kor_isnm, 
+            code: s.mksc_shrn_iscd, 
+            chg: parseFloat(s.prdy_ctrt||0), 
+            amt: Math.round(parseInt(rawAmt) / 100000000)
+          };
+        });
+      } catch(e) { log(`  [fetchRank] 오류: etcCls=${etcCls} sort=${rankSort} ${e.message}`); return null; }
     };
 
     // 1:외국인, 2:기관, 3:개인 순차 호출
