@@ -430,7 +430,7 @@ async function fetchKrStocks(token, prev, times) {
             name: s.hts_kor_isnm, 
             code: s.mksc_shrn_iscd, 
             chg: parseFloat(s.prdy_ctrt || 0), 
-            amt: Math.round(rawAmt / 100) // 백만원 → 억원
+            amt: Math.round(rawAmt / 10000) // 만원 → 억원
           };
         });
       } catch(e) { log(`  [fetchRank] 오류: etcCls=${etcCls} sort=${rankSort} ${e.message}`); return null; }
