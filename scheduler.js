@@ -401,32 +401,34 @@ async function fetchKrStocks(token, prev, times) {
     if(volume.length > 0) isUpdated = true;
     await sleep(800); 
 
-    // 투자자 구분별 실제 순매수 필드명
-    // etcCls 1=외국인: frgn_ntby_tr_pbmn
-    // etcCls 2=기관:   orgn_ntby_tr_pbmn
-    // etcCls 3=개인:   prsn_ntby_tr_pbmn
-    const AMT_FIELD = { 1: 'frgn_ntby_tr_pbmn', 2: 'orgn_ntby_tr_pbmn', 3: 'prsn_ntby_tr_pbmn' };
+    // ── 로그 확인 결과 (2026-04-28):
+    // API 응답 단위: 백만원 (÷100 → 억원)
+    // 외국인(1): frgn_ntby_tr_pbmn ✅ 정상
+    // 기관(2):   orgn_ntby_tr_pbmn ✅ 정상
+    // 개인(3):   prsn_ntby_tr_pbmn ❌ 없음 → frgn+orgn 합산의 반대 부호로 역산
+    const AMT_FIELD = { 1: 'frgn_ntby_tr_pbmn', 2: 'orgn_ntby_tr_pbmn' };
 
     const fetchRank = async (etcCls, rankSort) => {
       try {
         const r = await kisGet('/uapi/domestic-stock/v1/quotations/foreign-institution-total', token, 'FHPTJ04400000',
           { FID_COND_MRKT_DIV_CODE: 'V', FID_COND_SCR_DIV_CODE: '16449', FID_INPUT_ISCD: '0001', FID_DIV_CLS_CODE: '0', FID_RANK_SORT_CLS_CODE: String(rankSort), FID_ETC_CLS_CODE: String(etcCls) });
-        const field = AMT_FIELD[etcCls] || 'ntby_tr_pbmn';
-        
-        // ── 디버그: 첫 번째 레코드의 필드를 로그로 확인
-        if (r?.output?.length) {
-          const sample = r.output[0];
-          log(`  [fetchRank] etcCls=${etcCls} sort=${rankSort} field=${field} val=${sample[field]} ntby=${sample.ntby_tr_pbmn} keys=${Object.keys(sample).filter(k=>k.includes('ntby')).join(',')}`);
-        }
         
         return (r?.output||[]).slice(0,5).map(s => {
-          // 투자자별 필드 → 공통 필드 → 0 순서로 폴백
-          const rawAmt = s[field] ?? s.ntby_tr_pbmn ?? s.frgn_ntby_tr_pbmn ?? s.orgn_ntby_tr_pbmn ?? s.prsn_ntby_tr_pbmn ?? '0';
+          let rawAmt;
+          if (etcCls === 3) {
+            // 개인 금액 = -(외국인 + 기관) : API가 prsn 필드를 제공하지 않음
+            const frgn = parseInt(s.frgn_ntby_tr_pbmn || 0);
+            const orgn = parseInt(s.orgn_ntby_tr_pbmn || 0);
+            rawAmt = -(frgn + orgn);
+          } else {
+            const field = AMT_FIELD[etcCls];
+            rawAmt = parseInt(s[field] || 0);
+          }
           return { 
             name: s.hts_kor_isnm, 
             code: s.mksc_shrn_iscd, 
-            chg: parseFloat(s.prdy_ctrt||0), 
-            amt: Math.round(parseInt(rawAmt) / 100000000)
+            chg: parseFloat(s.prdy_ctrt || 0), 
+            amt: Math.round(rawAmt / 100) // 백만원 → 억원
           };
         });
       } catch(e) { log(`  [fetchRank] 오류: etcCls=${etcCls} sort=${rankSort} ${e.message}`); return null; }
