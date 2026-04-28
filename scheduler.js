@@ -416,10 +416,12 @@ async function fetchKrStocks(token, prev, times) {
         return (r?.output||[]).slice(0,5).map(s => {
           let rawAmt;
           if (etcCls === 3) {
-            // 개인 금액 = -(외국인 + 기관) : API가 prsn 필드를 제공하지 않음
+            // 개인 금액: API가 prsn 필드를 제공하지 않으므로 외국인+기관 합산을 역산
+            // 단, 부호는 rankSort로 결정 (0=순매수→양수, 1=순매도→음수)
             const frgn = parseInt(s.frgn_ntby_tr_pbmn || 0);
             const orgn = parseInt(s.orgn_ntby_tr_pbmn || 0);
-            rawAmt = -(frgn + orgn);
+            const absAmt = Math.abs(frgn + orgn);
+            rawAmt = rankSort === 0 ? absAmt : -absAmt;
           } else {
             const field = AMT_FIELD[etcCls];
             rawAmt = parseInt(s[field] || 0);
