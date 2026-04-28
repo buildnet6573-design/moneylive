@@ -382,7 +382,7 @@ async function fetchKrStocks(token, prev, times) {
 
   try {
     const volRes = await kisGet('/uapi/domestic-stock/v1/quotations/volume-rank', token, 'FHPST01710000',
-      { FID_COND_MRKT_DIV_CODE: 'J', FID_COND_SCR_DIV_CODE: '20171', FID_INPUT_ISCD: '0000', FID_DIV_CLS_CODE: '0', FID_BLNG_CLS_CODE: '0', FID_TRGT_CLS_CODE: '111111111', FID_TRGT_EXLS_CLS_CODE: '000000', FID_INPUT_PRICE_1: '', FID_INPUT_PRICE_2: '', FID_VOL_CNT: '', FID_INPUT_DATE_1: '' });
+      { FID_COND_MRKT_DIV_CODE: 'J', FID_COND_SCR_DIV_CODE: '20171', FID_INPUT_ISCD: '0000', FID_DIV_CLS_CODE: '0', FID_BLNG_CLS_CODE: '3', FID_TRGT_CLS_CODE: '111111111', FID_TRGT_EXLS_CLS_CODE: '000000', FID_INPUT_PRICE_1: '', FID_INPUT_PRICE_2: '', FID_VOL_CNT: '', FID_INPUT_DATE_1: '' });
     
     const volumeRaw = volRes?.output || [];
     
@@ -430,7 +430,7 @@ async function fetchKrStocks(token, prev, times) {
             name: s.hts_kor_isnm, 
             code: s.mksc_shrn_iscd, 
             chg: parseFloat(s.prdy_ctrt || 0), 
-            amt: Math.round(rawAmt / 10000) // 만원 → 억원
+            amt: Math.round(rawAmt / 100) // 백만원 → 억원 (API 문서 확인)
           };
         });
       } catch(e) { log(`  [fetchRank] 오류: etcCls=${etcCls} sort=${rankSort} ${e.message}`); return null; }
@@ -441,8 +441,7 @@ async function fetchKrStocks(token, prev, times) {
     const fS = await fetchRank(1, 1); await sleep(800);
     const iB = await fetchRank(2, 0); await sleep(800);
     const iS = await fetchRank(2, 1); await sleep(800);
-    const pB = await fetchRank(3, 0); await sleep(800); // 개인 순매수 상위
-    const pS = await fetchRank(3, 1); // 개인 순매도 상위
+    // 개인 순매수/순매도: API 미지원 (FID_ETC_CLS_CODE 3=기타)
 
     if (isUpdated) times.krStock = getTimeStr();
     return {
@@ -451,8 +450,7 @@ async function fetchKrStocks(token, prev, times) {
       foreignSell:fS?.length ? fS : prevStocks.foreignSell,
       instBuy: iB?.length ? iB : prevStocks.instBuy,
       instSell: iS?.length ? iS : prevStocks.instSell,
-      indvBuy: pB?.length ? pB : (prevStocks.indvBuy || null), 
-      indvSell: pS?.length ? pS : (prevStocks.indvSell || null),
+
     };
   } catch(e) {
     log(`  ⚠️ KR종목 실패→이전유지: ${e.message}`);
