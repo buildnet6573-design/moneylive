@@ -690,9 +690,9 @@ function renderStockTable(tbodyId, stocks, mode = 'flow'){
 
     if (absAmt !== 0) {
       if (mode === 'volume') {
-        // 거래대금: 회색 유지, 1조(10000억) 이상이면 굵게
+        // 거래대금: 항상 회색(--text2), 1조(10000억) 이상이면 굵게만 추가
         as = fmtVol(absAmt);
-        if (absAmt >= 10000) extraStyle = 'font-weight:800;color:var(--text);';
+        extraStyle = absAmt >= 10000 ? 'font-weight:800;' : '';
       } else {
         // 순매수/순매도: 양수=초록, 음수=빨강
         ac = amt > 0 ? 'up' : 'down';
@@ -700,10 +700,15 @@ function renderStockTable(tbodyId, stocks, mode = 'flow'){
       }
     }
 
+    // volume 모드는 class 없이 style만, flow 모드는 class로 색상 제어
+    const amtTd = mode === 'volume'
+      ? `<td style="color:var(--text2);${extraStyle}">${as}</td>`
+      : `<td class="${ac}">${as}</td>`;
+
     return `<tr>
       <td style="color:var(--text)"><span class="stock-rank">${i+1}</span><span class="stock-name">${s.name}</span><span class="stock-code">(${s.code})</span></td>
       <td class="${cc}">${cs}</td>
-      <td class="${ac}" style="${extraStyle}">${as}</td>
+      ${amtTd}
     </tr>`;
   }).join('');
 }
