@@ -275,10 +275,6 @@
     <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>전일비</th><th>순매수 (▼)</th></tr><tbody id="inst-buy"></tbody></table></div>
     <div class="section-label section-gap">기관 순매도 상위</div>
     <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>전일비</th><th>순매도 (▼)</th></tr><tbody id="inst-sell"></tbody></table></div>
-    <div class="section-label section-gap">개인 순매수 상위</div>
-    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>전일비</th><th>순매수 (▼)</th></tr><tbody id="indv-buy"></tbody></table></div>
-    <div class="section-label section-gap">개인 순매도 상위</div>
-    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>전일비</th><th>순매도 (▼)</th></tr><tbody id="indv-sell"></tbody></table></div>
   </div>
 
   <div class="tab-content" id="tab-2">
@@ -909,8 +905,7 @@ async function loadAll(){
       if(d.stocks.foreignSell)renderStockTable('foreign-sell',d.stocks.foreignSell,'flow');
       if(d.stocks.instBuy)renderStockTable('inst-buy',d.stocks.instBuy,'flow');
       if(d.stocks.instSell)renderStockTable('inst-sell',d.stocks.instSell,'flow');
-      if(d.stocks.indvBuy)renderStockTable('indv-buy',d.stocks.indvBuy,'flow');
-      if(d.stocks.indvSell)renderStockTable('indv-sell',d.stocks.indvSell,'flow');
+      // 개인 순매수/순매도: API 미지원으로 제거
     }
 
     if(d.us){
