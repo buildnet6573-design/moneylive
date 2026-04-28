@@ -318,6 +318,16 @@ async function fetchDepth(token, prev, times) {
 // ─────────────────────────────────────────────
 async function fetchKrSectors(token, prev, times) {
   log('📊 KR 섹터 수집 중 (KIS)...');
+
+  // 장 마감 확정 데이터는 15:30~18:30 사이 수집분만 유효
+  // 그 외 시간(07:55 등)에는 chg/vol이 0으로 내려오므로 이전 데이터 유지
+  const h = kstNow().getHours();
+  const m = kstNow().getMinutes();
+  const isValidTime = (h === 15 && m >= 30) || (h === 16) || (h === 17) || (h === 18 && m <= 30);
+  if (!isValidTime && prev?.sectors?.length) {
+    log('  ℹ️ 장 마감 시간 외 → 섹터 이전 데이터 유지');
+    return prev.sectors;
+  }
   
   const sectors = [
     { code: '005930', name: '반도체/IT', reps: '대표종목: 삼성전자, SK하이닉스, 한미반도체 등' },
@@ -373,6 +383,16 @@ async function fetchKrSectors(token, prev, times) {
 async function fetchKrStocks(token, prev, times) {
   log('📋 KR 순위 종목 수집 중 (KIS)...');
   const prevStocks = prev?.stocks || {};
+
+  // 장 마감 확정 데이터는 15:30~18:30 사이 수집분만 유효
+  const h = kstNow().getHours();
+  const m = kstNow().getMinutes();
+  const isValidTime = (h === 15 && m >= 30) || (h === 16) || (h === 17) || (h === 18 && m <= 30);
+  if (!isValidTime && prevStocks.volume?.length) {
+    log('  ℹ️ 장 마감 시간 외 → 종목 순위 이전 데이터 유지');
+    return prevStocks;
+  }
+
   let isUpdated = false;
 
   try {
@@ -383,7 +403,8 @@ async function fetchKrStocks(token, prev, times) {
     
     // 1. ETF, ETN, 인버스, 레버리지 완벽 필터링 후 2. 누적거래대금(acml_tr_pbmn) 기준으로 진짜 TOP 10 추출
     const volume = volumeRaw
-      .filter(s => !/KODEX|TIGER|KBSTAR|ACE|ARIRANG|HANARO|KOSEF|ETN|선물|인버스|레버리지/i.test(s.hts_kor_isnm))
+      .filter(s => !/KODEX|TIGER|KBSTAR|ACE|ARIRANG|HANARO|KOSEF|PLUS|RISE|KCGI|ETN|선물|인버스|레버리지|액티브|채권|리츠/i.test(s.hts_kor_isnm))
+      .filter(s => !/^[0-9]{4}[A-Z]/.test(s.mksc_shrn_iscd)) // 코드가 숫자4자리+영문인 ETF 코드 패턴 제거
       .sort((a, b) => parseInt(b.acml_tr_pbmn||0) - parseInt(a.acml_tr_pbmn||0))
       .slice(0, 10)
       .map(s => ({
@@ -395,14 +416,21 @@ async function fetchKrStocks(token, prev, times) {
     if(volume.length > 0) isUpdated = true;
     await sleep(800); 
 
+    // 투자자 구분별 실제 순매수 필드명
+    // etcCls 1=외국인: frgn_ntby_tr_pbmn
+    // etcCls 2=기관:   orgn_ntby_tr_pbmn
+    // etcCls 3=개인:   prsn_ntby_tr_pbmn
+    const AMT_FIELD = { 1: 'frgn_ntby_tr_pbmn', 2: 'orgn_ntby_tr_pbmn', 3: 'prsn_ntby_tr_pbmn' };
+
     const fetchRank = async (etcCls, rankSort) => {
       try {
         const r = await kisGet('/uapi/domestic-stock/v1/quotations/foreign-institution-total', token, 'FHPTJ04400000',
           { FID_COND_MRKT_DIV_CODE: 'V', FID_COND_SCR_DIV_CODE: '16449', FID_INPUT_ISCD: '0001', FID_DIV_CLS_CODE: '0', FID_RANK_SORT_CLS_CODE: String(rankSort), FID_ETC_CLS_CODE: String(etcCls) });
+        const field = AMT_FIELD[etcCls] || 'ntby_tr_pbmn';
         return (r?.output||[]).slice(0,5).map(s => ({ 
           name: s.hts_kor_isnm, code: s.mksc_shrn_iscd, 
           chg: parseFloat(s.prdy_ctrt||0), 
-          amt: Math.round(parseInt(s.ntby_tr_pbmn||s.frgn_ntby_tr_pbmn||0) / 100000000) 
+          amt: Math.round(parseInt(s[field] || s.ntby_tr_pbmn || 0) / 100000000)
         }));
       } catch(e) { return null; }
     };
@@ -560,7 +588,7 @@ log('🚀 MONEYLIVE 스케줄러 v5.6 시작');
 log(`📁 저장경로: storage/data/ + storage/logs/`);
 log('스케줄: 15:00 토큰 / 15:35 / 18:05 / 06:05 / 07:55');
 
-scheduleAt(15,  0, async () => { log('[15:00] 토큰 발급'); await issueToken(); flushLog(); });
+scheduleAt(15,  0, async () => { log('[15:00] 토큰 발급'); await getToken(); flushLog(); });
 scheduleAt(15, 35, () => { log('[15:35] 1차 수집'); collect(); });
 scheduleAt(18,  5, () => { log('[18:05] 2차 수집'); collect(); });
 scheduleAt( 6,  5, () => { log('[06:05] 3차 수집'); collect(); });
