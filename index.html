@@ -128,6 +128,24 @@
   .update-desc li { margin-bottom: 4px; }
   .update-desc li:last-child { margin-bottom: 0; }
   .update-divider { height: 0.5px; background: var(--border); margin: 8px 0; }
+
+  /* ── 바텀시트 팝업 ── */
+  .sheet-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100;opacity:0;transition:opacity 0.3s var(--ease);pointer-events:none;}
+  .sheet-overlay.show{opacity:1;pointer-events:auto;}
+  .sheet{position:fixed;bottom:0;left:50%;transform:translateX(-50%) translateY(100%);width:100%;max-width:390px;background:var(--bg2);border-radius:24px 24px 0 0;z-index:101;padding:28px 24px 36px;transition:transform 0.4s var(--ease);}
+  .sheet.show{transform:translateX(-50%) translateY(0);}
+  .sheet-handle{width:36px;height:4px;background:var(--text3);border-radius:2px;margin:0 auto 24px;}
+  .sheet-title{font-size:16px;font-weight:800;color:var(--text);margin-bottom:16px;line-height:1.4;}
+  .sheet-body{font-size:13px;color:var(--text2);line-height:1.9;margin-bottom:20px;}
+  .sheet-body strong{color:var(--text);font-weight:800;}
+  .sheet-body .sheet-joke{font-size:12px;color:var(--text3);margin-top:12px;font-style:italic;}
+  .sheet-divider{height:0.5px;background:var(--border);margin:16px 0;}
+  .sheet-disclaimer{font-size:11px;color:var(--text3);line-height:1.7;}
+  .sheet-footer{display:flex;align-items:center;justify-content:space-between;margin-top:20px;gap:12px;}
+  .sheet-check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;}
+  .sheet-check input{width:14px;height:14px;accent-color:var(--text);cursor:pointer;}
+  .sheet-btn{flex-shrink:0;padding:10px 24px;background:var(--text);color:var(--bg);border:none;border-radius:12px;font-size:13px;font-weight:800;font-family:'Nanum Gothic',sans-serif;cursor:pointer;transition:opacity 0.15s;}
+  .sheet-btn:active{opacity:0.8;}
 </style>
 </head>
 <body>
@@ -250,17 +268,17 @@
     <div class="section-label section-gap">거래대금 상위 TOP 10</div>
     <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>등락률</th><th>거래대금 (▼)</th></tr><tbody id="stock-volume"></tbody></table></div>
     <div class="section-label section-gap">외국인 순매수 상위</div>
-    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>등락률</th><th>순매수 (▼)</th></tr><tbody id="foreign-buy"></tbody></table></div>
+    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th id="th-chg">전일비</th><th>순매수 (▼)</th></tr><tbody id="foreign-buy"></tbody></table></div>
     <div class="section-label section-gap">외국인 순매도 상위</div>
-    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>등락률</th><th>순매도 (▼)</th></tr><tbody id="foreign-sell"></tbody></table></div>
+    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>전일비</th><th>순매도 (▼)</th></tr><tbody id="foreign-sell"></tbody></table></div>
     <div class="section-label section-gap">기관 순매수 상위</div>
-    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>등락률</th><th>순매수 (▼)</th></tr><tbody id="inst-buy"></tbody></table></div>
+    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>전일비</th><th>순매수 (▼)</th></tr><tbody id="inst-buy"></tbody></table></div>
     <div class="section-label section-gap">기관 순매도 상위</div>
-    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>등락률</th><th>순매도 (▼)</th></tr><tbody id="inst-sell"></tbody></table></div>
+    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>전일비</th><th>순매도 (▼)</th></tr><tbody id="inst-sell"></tbody></table></div>
     <div class="section-label section-gap">개인 순매수 상위</div>
-    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>등락률</th><th>순매수 (▼)</th></tr><tbody id="indv-buy"></tbody></table></div>
+    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>전일비</th><th>순매수 (▼)</th></tr><tbody id="indv-buy"></tbody></table></div>
     <div class="section-label section-gap">개인 순매도 상위</div>
-    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>등락률</th><th>순매도 (▼)</th></tr><tbody id="indv-sell"></tbody></table></div>
+    <div class="card"><table class="stock-table"><colgroup><col><col><col></colgroup><tr><th>종목 (코드)</th><th>전일비</th><th>순매도 (▼)</th></tr><tbody id="indv-sell"></tbody></table></div>
   </div>
 
   <div class="tab-content" id="tab-2">
@@ -497,8 +515,61 @@
   </div>
 </div>
 
+<!-- ── 바텀시트 팝업 ── -->
+<div class="sheet-overlay" id="sheet-overlay" onclick="closeSheet()"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">왜 MONEYLIVE를 만들었냐고요?</div>
+  <div class="sheet-body">
+    바쁜 하루를 보내고 나면<br>
+    어제 시장이 어떻게 움직였는지 놓치기 일쑤입니다.<br><br>
+    <strong>개장 전 5분,</strong><br>
+    어제 지수·수급·섹터 흐름을 한눈에 파악하고<br>
+    나의 오늘 주식 전략을 세울 수 있지 않을까요?<br><br>
+    그래서 만들었습니다.
+    <div class="sheet-joke">아, 참고로 이름은 MONEYLIVE지만<br>막상 만들어보니 데이터 수급이 어려워서... 아직 완전한 라이브는 아닙니다. 😅</div>
+  </div>
+  <div class="sheet-divider"></div>
+  <div class="sheet-disclaimer">⚠️ 본 사이트의 모든 데이터는 참고용이며, 투자 판단과 그에 따른 결과는 전적으로 본인의 책임입니다.</div>
+  <div class="sheet-footer">
+    <label class="sheet-check"><input type="checkbox" id="sheet-hide-today"> 오늘 하루 보지 않기</label>
+    <button class="sheet-btn" onclick="closeSheet()">시작하기</button>
+  </div>
+</div>
 <script>
 const DAYS=['일','월','화','수','목','금','토'];
+
+// ── 전일비 날짜 헤더 동적 업데이트
+function updateChgHeaders() {
+  const kst = new Date(new Date().toLocaleString('en-US', {timeZone:'Asia/Seoul'}));
+  let prev = new Date(kst);
+  prev.setDate(prev.getDate() - 1);
+  while (prev.getDay() === 0 || prev.getDay() === 6) prev.setDate(prev.getDate() - 1);
+  const label = `전일비 (${prev.getMonth()+1}/${prev.getDate()})`;
+  document.querySelectorAll('#th-chg, .th-chg-label').forEach(el => { el.textContent = label; });
+}
+updateChgHeaders();
+
+// ── 바텀시트 팝업
+function showSheet() {
+  const isDarkNow = document.getElementById('app').classList.contains('dark');
+  ['sheet-overlay','sheet'].forEach(id => {
+    document.getElementById(id).classList.toggle('dark', isDarkNow);
+  });
+  document.getElementById('sheet-overlay').classList.add('show');
+  document.getElementById('sheet').classList.add('show');
+}
+function closeSheet() {
+  if (document.getElementById('sheet-hide-today').checked) {
+    localStorage.setItem('ml_popup_hide', new Date().toDateString());
+  }
+  document.getElementById('sheet-overlay').classList.remove('show');
+  document.getElementById('sheet').classList.remove('show');
+}
+(function initPopup() {
+  const hideUntil = localStorage.getItem('ml_popup_hide');
+  if (hideUntil !== new Date().toDateString()) setTimeout(showSheet, 400);
+})();
 
 // 다크모드 설정
 let isDark = localStorage.getItem('ml_theme') !== 'light'; 
@@ -694,16 +765,15 @@ function renderStockTable(tbodyId, stocks, mode = 'flow'){
         as = fmtVol(absAmt);
         extraStyle = absAmt >= 10000 ? 'font-weight:800;' : '';
       } else {
-        // 순매수/순매도: 양수=초록, 음수=빨강
-        ac = amt > 0 ? 'up' : 'down';
+        // 순매수/순매도: 색상 없이 회색, 부호만 표시
         as = (amt > 0 ? '+' : '-') + fmtVol(absAmt);
       }
     }
 
-    // volume 모드는 class 없이 style만, flow 모드는 class로 색상 제어
+    // 금액 컬럼: 항상 회색(--text2), 1조 이상 volume만 굵게
     const amtTd = mode === 'volume'
       ? `<td style="color:var(--text2);${extraStyle}">${as}</td>`
-      : `<td class="${ac}">${as}</td>`;
+      : `<td style="color:var(--text2);">${as}</td>`;
 
     return `<tr>
       <td style="color:var(--text)"><span class="stock-rank">${i+1}</span><span class="stock-name">${s.name}</span><span class="stock-code">(${s.code})</span></td>
