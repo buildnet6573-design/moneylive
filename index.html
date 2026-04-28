@@ -675,16 +675,36 @@ function renderSectorList(sectors){
   }).join('');
 }
 
-function renderStockTable(tbodyId,stocks){
+function renderStockTable(tbodyId, stocks, mode = 'flow'){
   if(!stocks || stocks.length === 0) return;
   const sorted = [...stocks].sort((a, b) => Math.abs(parseFloat(b.amt||0)) - Math.abs(parseFloat(a.amt||0)));
   document.getElementById(tbodyId).innerHTML = sorted.map((s,i)=>{
-    const cc=s.chg>=0?'up':'down'; const cs=(s.chg>=0?'▲ +':'▼ ')+Math.abs(s.chg).toFixed(2)+'%';
-    const amt = parseInt(s.amt)||0;
-    // amt가 0이면 '-' 표시, 값이 있으면 색상+금액 표시
-    const ac = amt === 0 ? 'neutral' : (amt > 0 ? 'up' : 'down');
-    const as = amt === 0 ? '-' : (amt > 0 ? '+' : '-') + fmtVol(Math.abs(amt));
-    return`<tr><td style="color:var(--text)"><span class="stock-rank">${i+1}</span><span class="stock-name">${s.name}</span><span class="stock-code">(${s.code})</span></td><td class="${cc}">${cs}</td><td class="${ac}">${as}</td></tr>`;
+    const cc = s.chg >= 0 ? 'up' : 'down';
+    const cs = (s.chg >= 0 ? '▲ +' : '▼ ') + Math.abs(s.chg).toFixed(2) + '%';
+    const amt = parseInt(s.amt) || 0;
+    const absAmt = Math.abs(amt);
+
+    let ac = 'neutral';
+    let as = '-';
+    let extraStyle = '';
+
+    if (absAmt !== 0) {
+      if (mode === 'volume') {
+        // 거래대금: 회색 유지, 1조(10000억) 이상이면 굵게
+        as = fmtVol(absAmt);
+        if (absAmt >= 10000) extraStyle = 'font-weight:800;color:var(--text);';
+      } else {
+        // 순매수/순매도: 양수=초록, 음수=빨강
+        ac = amt > 0 ? 'up' : 'down';
+        as = (amt > 0 ? '+' : '-') + fmtVol(absAmt);
+      }
+    }
+
+    return `<tr>
+      <td style="color:var(--text)"><span class="stock-rank">${i+1}</span><span class="stock-name">${s.name}</span><span class="stock-code">(${s.code})</span></td>
+      <td class="${cc}">${cs}</td>
+      <td class="${ac}" style="${extraStyle}">${as}</td>
+    </tr>`;
   }).join('');
 }
 
@@ -784,8 +804,8 @@ async function loadAll(){
 
     if(d.supply){
       const f=setSupplyVal('foreign',d.supply.foreign)||0;
-      const inst=setSupplyVal('institution',d.supply.organ)||0; // 수정됨
-      const ind=setSupplyVal('individual',d.supply.person)||0;  // 수정됨
+      const inst=setSupplyVal('institution',d.supply.institution)||0;
+      const ind=setSupplyVal('individual',d.supply.individual)||0;
       renderSupplySummary(f,inst,ind);
       renderSupplyWeek((d.supply.history||[]),f+inst+ind);
     }
@@ -809,13 +829,13 @@ async function loadAll(){
     if(d.sectors) renderSectorList(d.sectors);
 
     if(d.stocks){
-      if(d.stocks.volume)renderStockTable('stock-volume',d.stocks.volume);
-      if(d.stocks.foreignBuy)renderStockTable('foreign-buy',d.stocks.foreignBuy);
-      if(d.stocks.foreignSell)renderStockTable('foreign-sell',d.stocks.foreignSell);
-      if(d.stocks.instBuy)renderStockTable('inst-buy',d.stocks.instBuy);
-      if(d.stocks.instSell)renderStockTable('inst-sell',d.stocks.instSell);
-      if(d.stocks.indvBuy)renderStockTable('indv-buy',d.stocks.indvBuy);
-      if(d.stocks.indvSell)renderStockTable('indv-sell',d.stocks.indvSell);
+      if(d.stocks.volume)renderStockTable('stock-volume',d.stocks.volume,'volume');
+      if(d.stocks.foreignBuy)renderStockTable('foreign-buy',d.stocks.foreignBuy,'flow');
+      if(d.stocks.foreignSell)renderStockTable('foreign-sell',d.stocks.foreignSell,'flow');
+      if(d.stocks.instBuy)renderStockTable('inst-buy',d.stocks.instBuy,'flow');
+      if(d.stocks.instSell)renderStockTable('inst-sell',d.stocks.instSell,'flow');
+      if(d.stocks.indvBuy)renderStockTable('indv-buy',d.stocks.indvBuy,'flow');
+      if(d.stocks.indvSell)renderStockTable('indv-sell',d.stocks.indvSell,'flow');
     }
 
     if(d.us){
