@@ -679,7 +679,9 @@ function renderStockTable(tbodyId,stocks){
   document.getElementById(tbodyId).innerHTML = sorted.map((s,i)=>{
     const cc=s.chg>=0?'up':'down'; const cs=(s.chg>=0?'▲ +':'▼ ')+Math.abs(s.chg).toFixed(2)+'%';
     const amt = parseInt(s.amt)||0;
-    const ac=amt>=0?'up':'down'; const as=(amt>=0?'+':'-')+fmtVol(Math.abs(amt));
+    // amt가 0이면 '-' 표시, 값이 있으면 색상+금액 표시
+    const ac = amt === 0 ? 'neutral' : (amt > 0 ? 'up' : 'down');
+    const as = amt === 0 ? '-' : (amt > 0 ? '+' : '-') + fmtVol(Math.abs(amt));
     return`<tr><td><span class="stock-rank">${i+1}</span><span class="stock-name">${s.name}</span><span class="stock-code">(${s.code})</span></td><td class="${cc}">${cs}</td><td class="${ac}">${as}</td></tr>`;
   }).join('');
 }
