@@ -392,13 +392,14 @@ function buildSupplyResult(newVals, prev) {
   const today       = getDateStr(0);
   const total       = foreign + individual + institution;
   const prevHistory = prev?.supply?.history || [];
+  // 오늘 포함 5개 보관 → 프론트에서 slice(-5,-1) = 직전 4거래일, 오늘은 별도 칸
   const history     = [...prevHistory.filter(h => h.date !== today), { date: today, total }]
     .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(-4);
+    .slice(-5);
   return { foreign, individual, institution, history };
 }
 
-// fetchProgram 제거됨: 프로그램매매는 단일종목 분석용으로 사이트 컨셉과 맞지 않아 제거
+// fetchProgram 제거됨: 단일종목 분석용으로 사이트 컨셉과 맞지 않아 제거
 
 // ── 마켓 뎁스 ─────────────────────────────────
 async function fetchDepth(token, prev, times) {
