@@ -212,7 +212,7 @@
         <div class="week-day"><span class="week-day-date">-</span><span class="week-day-dow">-</span><span class="sday-tag stag-neu">-</span><span class="sday-val neutral">-</span></div>
         <div class="week-day"><span class="week-day-date">-</span><span class="week-day-dow">-</span><span class="sday-tag stag-neu">-</span><span class="sday-val neutral">-</span></div>
         <div class="week-day"><span class="week-day-date">-</span><span class="week-day-dow">-</span><span class="sday-tag stag-neu">-</span><span class="sday-val neutral">-</span></div>
-        <div class="week-today"><span class="week-today-date" id="sw-td">-</span><span class="week-today-label">오늘</span><span class="stoday-tag stag-neu" id="sw-tag">-</span><span class="stoday-val loading" id="sw-val">-</span></div>
+        <div class="week-day" id="supply-today"><span class="week-day-date" id="sw-td">-</span><span class="week-day-dow" id="sw-dow">오늘</span><span class="sday-tag stag-neu" id="sw-tag">-</span><span class="sday-val neutral loading" id="sw-val">-</span></div>
       </div>
     </div>
 
@@ -228,15 +228,7 @@
       <div class="depth-labels"><span class="up">상승</span><span class="neutral" id="depth-neu-n">보합 -</span><span class="down">하락</span></div>
     </div>
 
-    <div class="section-label section-gap">프로그램 매매</div>
-    <div class="card">
-      <div class="card-label-row"><span class="card-label">차익 / 비차익 매매</span><button class="info-btn" onclick="toggleTip('t-prog', event)">?</button></div>
-      <div class="tooltip" id="t-prog">차익거래는 선물·현물 가격차를 이용한 매매예요. 비차익거래는 여러 종목을 묶어 대량으로 사고파는 방식이에요. 비차익 대량 매수는 외국인·기관이 시장 전체를 쓸어담는 신호예요.</div>
-      <div class="prog-row"><span class="prog-name">차익 매수</span><span class="prog-val loading" id="prog-buy-arb">-</span></div>
-      <div class="prog-row"><span class="prog-name">차익 매도</span><span class="prog-val loading" id="prog-sell-arb">-</span></div>
-      <div class="prog-row"><span class="prog-name">비차익 매수</span><span class="prog-val loading" id="prog-buy-non">-</span></div>
-      <div class="prog-row"><span class="prog-name">비차익 매도</span><span class="prog-val loading" id="prog-sell-non">-</span></div>
-    </div>
+
 
     <div class="section-label section-gap">한국 ETF</div>
     <div class="cards-grid">
@@ -437,7 +429,7 @@
     <div class="card">
       <div class="supply-row"><span class="supply-name">시장 지수</span><span class="supply-val loading" id="time-krIndex" style="font-weight:400; font-size:12px;">-</span></div>
       <div class="supply-row"><span class="supply-name">수급 동향</span><span class="supply-val loading" id="time-krSupply" style="font-weight:400; font-size:12px;">-</span></div>
-      <div class="supply-row"><span class="supply-name">프로그램 매매</span><span class="supply-val loading" id="time-krProgram" style="font-weight:400; font-size:12px;">-</span></div>
+
       <div class="supply-row"><span class="supply-name">마켓 뎁스</span><span class="supply-val loading" id="time-krDepth" style="font-weight:400; font-size:12px;">-</span></div>
       <div class="supply-row"><span class="supply-name">한국 ETF</span><span class="supply-val loading" id="time-krEtf" style="font-weight:400; font-size:12px;">-</span></div>
       <div class="supply-row"><span class="supply-name">KR 섹터</span><span class="supply-val loading" id="time-krSector" style="font-weight:400; font-size:12px;">-</span></div>
@@ -639,8 +631,14 @@ async function fetchWithCache(key, url, ttlMins = 5) {
   } catch(e) { return null; }
 }
 
-function fmtDate(d){ if(!d) return '-'; const dt = new Date(d); return isNaN(dt) ? d : `${dt.getMonth()+1}/${dt.getDate()}`; }
-function fmtDow(d){ if(!d) return '-'; const dt = new Date(d); return isNaN(dt) ? '' : DAYS[dt.getDay()]; }
+function parseDateLocal(d){
+  if(!d) return null;
+  const p=String(d).split('-');
+  if(p.length===3) return new Date(+p[0],+p[1]-1,+p[2]);
+  return new Date(d);
+}
+function fmtDate(d){ if(!d) return '-'; const dt=parseDateLocal(d); return (!dt||isNaN(dt))?d:`${dt.getMonth()+1}/${dt.getDate()}`; }
+function fmtDow(d){ if(!d) return '-'; const dt=parseDateLocal(d); return (!dt||isNaN(dt))?'':DAYS[dt.getDay()]; }
 function fmtKstTime(){ const now=new Date(); const kst=new Date(now.toLocaleString('en-US',{timeZone:'Asia/Seoul'})); return `${kst.getMonth()+1}월 ${kst.getDate()}일 (${DAYS[kst.getDay()]}) ${String(kst.getHours()).padStart(2,'0')}:${String(kst.getMinutes()).padStart(2,'0')} 기준`; }
 
 // 단위 환산 핵심 함수: 서버(v5.6)가 이미 '억'을 주므로 그대로 출력
@@ -704,23 +702,30 @@ function renderSupplySummary(f,inst,ind){
 
 function renderSupplyWeek(hist,todTotal){
   const cols=document.getElementById('supply-week').querySelectorAll('.week-day');
-  hist.forEach((item,i)=>{
-    const col=cols[i]; if(!col)return;
-    const isUp=item.total>=0;const isNeu=Math.abs(item.total)<500;
-    col.querySelector('.week-day-date').textContent=fmtDate(item.date);
-    col.querySelector('.week-day-dow').textContent=fmtDow(item.date);
-    const te=col.querySelector('.sday-tag');const ve=col.querySelector('.sday-val');
-    if(isNeu){te.textContent='균형';te.className='sday-tag stag-neu';ve.textContent=(item.total>=0?'+':'')+fmtVol(Math.abs(item.total));ve.className='sday-val neutral';}
-    else if(isUp){te.textContent='매수';te.className='sday-tag stag-buy';ve.textContent='+'+fmtVol(item.total);ve.className='sday-val up';}
-    else{te.textContent='매도';te.className='sday-tag stag-sell';ve.textContent='-'+fmtVol(Math.abs(item.total));ve.className='sday-val down';}
-  });
   const now=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
-  document.getElementById('sw-td').textContent=`${now.getMonth()+1}/${now.getDate()} ${DAYS[now.getDay()]}`;
-  const tte=document.getElementById('sw-tag');const tve=document.getElementById('sw-val');tve.classList.remove('loading');
-  const isUp=todTotal>=0;const isNeu=Math.abs(todTotal)<500;
-  if(isNeu){tte.textContent='균형';tte.className='stoday-tag stag-neu';tve.textContent=(todTotal>=0?'+':'')+fmtVol(Math.abs(todTotal));tve.className='stoday-val neutral';}
-  else if(isUp){tte.textContent='매수';tte.className='stoday-tag stag-buy';tve.textContent='+'+fmtVol(todTotal);tve.className='stoday-val up';}
-  else{tte.textContent='매도';tte.className='stoday-tag stag-sell';tve.textContent='-'+fmtVol(Math.abs(todTotal));tve.className='stoday-val down';}
+  // 직전 4거래일 + 오늘 → 5칸 모두 week-day 스타일로 통일
+  const items=[...hist.slice(-4),{date:null,total:todTotal,isToday:true}];
+  items.forEach((item,i)=>{
+    const col=cols[i]; if(!col)return;
+    const tot=parseInt(item.total||0); const isUp=tot>0; const isNeu=Math.abs(tot)<500;
+    const datEl=col.querySelector('.week-day-date');
+    const dowEl=col.querySelector('.week-day-dow');
+    const te=col.querySelector('.sday-tag');
+    const ve=col.querySelector('.sday-val');
+    if(item.isToday){
+      if(datEl) datEl.textContent=`${now.getMonth()+1}/${now.getDate()}`;
+      if(dowEl){dowEl.textContent='오늘';dowEl.style.fontWeight='700';dowEl.style.color='var(--accent)';}
+    } else {
+      if(datEl) datEl.textContent=fmtDate(item.date);
+      if(dowEl){dowEl.textContent=fmtDow(item.date);dowEl.style.fontWeight='';dowEl.style.color='';}
+    }
+    if(te&&ve){
+      ve.classList.remove('loading');
+      if(isNeu){te.textContent='균형';te.className='sday-tag stag-neu';ve.textContent=(tot>=0?'+':'')+fmtVol(Math.abs(tot));ve.className='sday-val neutral';}
+      else if(isUp){te.textContent='매수';te.className='sday-tag stag-buy';ve.textContent='+'+fmtVol(tot);ve.className='sday-val up';}
+      else{te.textContent='매도';te.className='sday-tag stag-sell';ve.textContent='-'+fmtVol(Math.abs(tot));ve.className='sday-val down';}
+    }
+  });
 }
 
 function renderSectorList(sectors){
@@ -870,8 +875,8 @@ async function loadAll(){
     setUtime('utime-4', ut.usData);           // 글로벌: 미국 데이터 수집 시간
     setUtime('utime-5', d.time || '-');       // 패치: 전체 수집 완료 시간
 
-    if(d.kospi?.value) renderWeek('kospi-week','kospi-td','kospi-v','kospi-c',(d.kospi.history||[]).slice(0,4),d.kospi.value,d.kospi.change);
-    if(d.kosdaq?.value) renderWeek('kosdaq-week','kosdaq-td','kosdaq-v','kosdaq-c',(d.kosdaq.history||[]).slice(0,4),d.kosdaq.value,d.kosdaq.change);
+    if(d.kospi?.value) renderWeek('kospi-week','kospi-td','kospi-v','kospi-c',(d.kospi.history||[]).slice(-5,-1),d.kospi.value,d.kospi.change);
+    if(d.kosdaq?.value) renderWeek('kosdaq-week','kosdaq-td','kosdaq-v','kosdaq-c',(d.kosdaq.history||[]).slice(-5,-1),d.kosdaq.value,d.kosdaq.change);
 
     if(d.supply){
       const f=setSupplyVal('foreign',d.supply.foreign)||0;
@@ -879,11 +884,6 @@ async function loadAll(){
       const ind=setSupplyVal('individual',d.supply.individual)||0;
       renderSupplySummary(f,inst,ind);
       renderSupplyWeek((d.supply.history||[]),f+inst+ind);
-    }
-
-    if(d.program){
-      const setP=(id,val)=>{const el=document.getElementById(id);if(!el)return; const bil=parseInt(val)||0; const isUp=bil>=0; el.textContent=(isUp?'▲ +':'▼ ')+fmtVol(Math.abs(bil)); el.className='prog-val '+(isUp?'up':'down');};
-      setP('prog-buy-arb',d.program.buyArb);setP('prog-sell-arb',d.program.sellArb);setP('prog-buy-non',d.program.buyNon);setP('prog-sell-non',d.program.sellNon);
     }
 
     if(d.depth){
