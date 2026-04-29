@@ -21,8 +21,15 @@
   .app{max-width:390px;width:100%;background:var(--bg);border-radius:24px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.12);transition:background 0.3s var(--ease);}
   
   /* 헤더 업데이트 중 삭제 */
-  .header{padding:20px 20px 14px;display:flex;justify-content:space-between;align-items:center;background:var(--bg2);border-bottom:0.5px solid var(--border);}
+  .header{padding:14px 20px 12px;display:flex;justify-content:space-between;align-items:center;background:var(--bg2);border-bottom:none;}
   .header-title{font-size:20px;font-weight:800;letter-spacing:1.5px;color:var(--text);}
+  .clock-bar{display:flex;flex-direction:column;gap:3px;padding:6px 20px;background:var(--bg2);border-bottom:0.5px solid var(--border);}
+  .clock-row{display:flex;align-items:baseline;gap:5px;}
+  .clock-sep{display:none;}
+  .clock-flag{font-size:9px;font-weight:700;color:var(--text2);min-width:20px;letter-spacing:0.3px;}
+  .clock-date{font-size:9px;color:var(--text2);}
+  .clock-time{font-size:9px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:0.5px;}
+  .clock-ampm{font-size:9px;font-weight:600;color:var(--text2);}
   
   .toggle-btn{width:36px;height:36px;border-radius:50%;border:none;cursor:pointer;background:var(--bg3);font-size:16px;display:flex;align-items:center;justify-content:center;transition:background 0.2s,transform 0.15s;}
   .toggle-btn:active{transform:scale(0.92);}
@@ -152,7 +159,22 @@
 <div class="app" id="app">
   <div class="header">
     <div class="header-title">MONEYLIVE</div>
-    <button class="toggle-btn" id="toggle-btn" onclick="toggleMode()">🌙</button>
+    <button class="toggle-btn" id="toggle-btn" onclick="toggleMode()" style="font-size:14px;padding:4px 8px;">🌙</button>
+  </div>
+  <div class="clock-bar">
+    <div class="clock-row">
+      <span class="clock-flag">KR</span>
+      <span class="clock-date" id="kr-date">-</span>
+      <span class="clock-time" id="kr-time">--:--:--</span>
+      <span class="clock-ampm" id="kr-ampm">--</span>
+    </div>
+    <span class="clock-sep">|</span>
+    <div class="clock-row">
+      <span class="clock-flag">US</span>
+      <span class="clock-date" id="us-date">-</span>
+      <span class="clock-time" id="us-time">--:--:--</span>
+      <span class="clock-ampm" id="us-ampm">--</span>
+    </div>
   </div>
   <div class="tab-bar">
     <button class="tab-btn active" onclick="switchTab(0,this)">🇰🇷 국내</button>
@@ -212,7 +234,7 @@
         <div class="week-day"><span class="week-day-date">-</span><span class="week-day-dow">-</span><span class="sday-tag stag-neu">-</span><span class="sday-val neutral">-</span></div>
         <div class="week-day"><span class="week-day-date">-</span><span class="week-day-dow">-</span><span class="sday-tag stag-neu">-</span><span class="sday-val neutral">-</span></div>
         <div class="week-day"><span class="week-day-date">-</span><span class="week-day-dow">-</span><span class="sday-tag stag-neu">-</span><span class="sday-val neutral">-</span></div>
-        <div class="week-day" id="supply-today"><span class="week-day-date" id="sw-td">-</span><span class="week-day-dow" id="sw-dow">오늘</span><span class="sday-tag stag-neu" id="sw-tag">-</span><span class="sday-val neutral loading" id="sw-val">-</span></div>
+        <div class="week-today"><span class="week-today-date" id="sw-td">-</span><span class="week-today-label">오늘</span><span class="stoday-tag stag-neu" id="sw-tag">-</span><span class="stoday-val loading" id="sw-val">-</span></div>
       </div>
     </div>
 
@@ -641,6 +663,28 @@ function fmtDate(d){ if(!d) return '-'; const dt=parseDateLocal(d); return (!dt|
 function fmtDow(d){ if(!d) return '-'; const dt=parseDateLocal(d); return (!dt||isNaN(dt))?'':DAYS[dt.getDay()]; }
 function fmtKstTime(){ const now=new Date(); const kst=new Date(now.toLocaleString('en-US',{timeZone:'Asia/Seoul'})); return `${kst.getMonth()+1}월 ${kst.getDate()}일 (${DAYS[kst.getDay()]}) ${String(kst.getHours()).padStart(2,'0')}:${String(kst.getMinutes()).padStart(2,'0')} 기준`; }
 
+// ── 헤더 실시간 시계 (KR / US) ───────────────
+function updateClock(){
+  const DAYS_KO=['일','월','화','수','목','금','토'];
+  function fmt(tz,dateId,timeId,ampmId){
+    const dt=new Date(new Date().toLocaleString('en-US',{timeZone:tz}));
+    const mo=String(dt.getMonth()+1).padStart(2,'0');
+    const d=String(dt.getDate()).padStart(2,'0');
+    const dow=DAYS_KO[dt.getDay()];
+    const h24=dt.getHours(); const ampm=h24<12?'AM':'PM';
+    const h12=String(h24%12||12).padStart(2,'0');
+    const mi=String(dt.getMinutes()).padStart(2,'0');
+    const se=String(dt.getSeconds()).padStart(2,'0');
+    document.getElementById(dateId).textContent=`${dt.getFullYear()}.${mo}.${d} ${dow}`;
+    document.getElementById(timeId).textContent=`${h12} : ${mi} : ${se}`;
+    document.getElementById(ampmId).textContent=ampm;
+  }
+  fmt('Asia/Seoul','kr-date','kr-time','kr-ampm');
+  fmt('America/New_York','us-date','us-time','us-ampm');
+}
+updateClock();
+setInterval(updateClock,1000);
+
 // 단위 환산 핵심 함수: 서버(v5.6)가 이미 '억'을 주므로 그대로 출력
 function fmtVol(bil){
   const abs=Math.abs(bil);
@@ -703,29 +747,26 @@ function renderSupplySummary(f,inst,ind){
 function renderSupplyWeek(hist,todTotal){
   const cols=document.getElementById('supply-week').querySelectorAll('.week-day');
   const now=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
-  // 직전 4거래일 + 오늘 → 5칸 모두 week-day 스타일로 통일
-  const items=[...hist.slice(-4),{date:null,total:todTotal,isToday:true}];
-  items.forEach((item,i)=>{
+  // hist.slice(-5,-1) = 오늘 제외 직전 4거래일 (코스피/코스닥과 동일 구조)
+  const prevDays=hist.slice(-5,-1);
+  prevDays.forEach((item,i)=>{
     const col=cols[i]; if(!col)return;
     const tot=parseInt(item.total||0); const isUp=tot>0; const isNeu=Math.abs(tot)<500;
-    const datEl=col.querySelector('.week-day-date');
-    const dowEl=col.querySelector('.week-day-dow');
-    const te=col.querySelector('.sday-tag');
-    const ve=col.querySelector('.sday-val');
-    if(item.isToday){
-      if(datEl) datEl.textContent=`${now.getMonth()+1}/${now.getDate()}`;
-      if(dowEl){dowEl.textContent='오늘';dowEl.style.fontWeight='700';dowEl.style.color='var(--accent)';}
-    } else {
-      if(datEl) datEl.textContent=fmtDate(item.date);
-      if(dowEl){dowEl.textContent=fmtDow(item.date);dowEl.style.fontWeight='';dowEl.style.color='';}
-    }
-    if(te&&ve){
-      ve.classList.remove('loading');
-      if(isNeu){te.textContent='균형';te.className='sday-tag stag-neu';ve.textContent=(tot>=0?'+':'')+fmtVol(Math.abs(tot));ve.className='sday-val neutral';}
-      else if(isUp){te.textContent='매수';te.className='sday-tag stag-buy';ve.textContent='+'+fmtVol(tot);ve.className='sday-val up';}
-      else{te.textContent='매도';te.className='sday-tag stag-sell';ve.textContent='-'+fmtVol(Math.abs(tot));ve.className='sday-val down';}
-    }
+    col.querySelector('.week-day-date').textContent=fmtDate(item.date);
+    col.querySelector('.week-day-dow').textContent=fmtDow(item.date);
+    const te=col.querySelector('.sday-tag'); const ve=col.querySelector('.sday-val');
+    if(isNeu){te.textContent='균형';te.className='sday-tag stag-neu';ve.textContent=(tot>=0?'+':'')+fmtVol(Math.abs(tot));ve.className='sday-val neutral';}
+    else if(isUp){te.textContent='매수';te.className='sday-tag stag-buy';ve.textContent='+'+fmtVol(tot);ve.className='sday-val up';}
+    else{te.textContent='매도';te.className='sday-tag stag-sell';ve.textContent='-'+fmtVol(Math.abs(tot));ve.className='sday-val down';}
   });
+  // 오늘 칸 (week-today)
+  const isUp=todTotal>0; const isNeu=Math.abs(todTotal)<500;
+  document.getElementById('sw-td').textContent=`${now.getMonth()+1}/${now.getDate()} ${DAYS[now.getDay()]}`;
+  const tte=document.getElementById('sw-tag'); const tve=document.getElementById('sw-val');
+  tve.classList.remove('loading');
+  if(isNeu){tte.textContent='균형';tte.className='stoday-tag stag-neu';tve.textContent=(todTotal>=0?'+':'')+fmtVol(Math.abs(todTotal));tve.className='stoday-val neutral';}
+  else if(isUp){tte.textContent='매수';tte.className='stoday-tag stag-buy';tve.textContent='+'+fmtVol(todTotal);tve.className='stoday-val up';}
+  else{tte.textContent='매도';tte.className='stoday-tag stag-sell';tve.textContent='-'+fmtVol(Math.abs(todTotal));tve.className='stoday-val down';}
 }
 
 function renderSectorList(sectors){
