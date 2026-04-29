@@ -365,19 +365,23 @@ async function fetchSupply(token, prev, times) {
       o = r.output[0];
       log(`  ✅ 일별 API 성공 (날짜: ${o.stck_bsop_date})`);
 
-      // 일별 API 단위: 백만원 (÷100 → 억원) → 여기서는 원 단위 유지 후 프론트에서 변환
-      const ff = parseInt(o.frgn_ntby_tr_pbmn || 0);
-      const fo = parseInt(o.orgn_ntby_tr_pbmn  || 0);
-      const fi = parseInt(o.prsn_ntby_tr_pbmn  || 0);
+      // 일별 API 단위: 백만원 → 억원 (÷100), 프론트 fmtVol()이 억 단위를 기대
+      const ff = Math.round(parseInt(o.frgn_ntby_tr_pbmn || 0) / 100);
+      const fo = Math.round(parseInt(o.orgn_ntby_tr_pbmn  || 0) / 100);
+      const fi = Math.round(parseInt(o.prsn_ntby_tr_pbmn  || 0) / 100);
+      log(`  ✅ 일별 API 성공 (날짜: ${o.stck_bsop_date}, 외국인: ${ff}억, 기관: ${fo}억, 개인: ${fi}억)`);
       times.krSupply = getTimeStr();
       return buildSupplyResult({ foreign: ff, individual: fi, institution: fo }, prev);
     }
 
-    // ─── 1차 성공: 시세성 API (단위: 백원 → 원 변환)
-    const f    = parseInt(o.frgn_ntby_tr_pbmn || 0) * 100;
-    const ind  = parseInt(o.prsn_ntby_tr_pbmn || 0) * 100;
-    const inst = parseInt(o.orgn_ntby_tr_pbmn || 0) * 100;
-    log(`  ✅ 장중 시세성 API 성공 (외국인: ${f}, 기관: ${inst}, 개인: ${ind})`);
+    // ─── 1차 성공: 시세성 API (단위: 백만원 → 억원 변환, ÷100)
+    // 문서 확인: FHPTJ04030000 응답값은 백만원 단위
+    // 예시: frgn_ntby_tr_pbmn=148656 → 148,656백만원 → 1,487억원
+    // 프론트(index.html) fmtVol()은 억 단위 숫자를 기대하므로 ÷100
+    const f    = Math.round(parseInt(o.frgn_ntby_tr_pbmn || 0) / 100);
+    const ind  = Math.round(parseInt(o.prsn_ntby_tr_pbmn || 0) / 100);
+    const inst = Math.round(parseInt(o.orgn_ntby_tr_pbmn || 0) / 100);
+    log(`  ✅ 장중 시세성 API 성공 (외국인: ${f}억, 기관: ${inst}억, 개인: ${ind}억)`);
     times.krSupply = getTimeStr();
     return buildSupplyResult({ foreign: f, individual: ind, institution: inst }, prev);
 
