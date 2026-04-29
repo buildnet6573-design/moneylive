@@ -398,105 +398,42 @@ function buildSupplyResult(newVals, prev) {
   return { foreign, individual, institution, history };
 }
 
-// ── 프로그램 매매 ─────────────────────────────
-async function fetchProgram(token, prev, times) {
-  log('🤖 프로그램 매매 수집 중 (KIS)...');
-  try {
-    // [버그 수정]
-    // 구버전 TR:  FHPPG04600001, URL: comp-program-trade-daily
-    // 신버전 TR:  FHPPG04600101, URL: comp-program-trade-today  ← 변경
-    // 응답 키:    output → output1                              ← 변경
-    // 파라미터:   FID_SCTN_CLS_CODE 공백, FID_INPUT_ISCD 공백 등 추가
-    const params = {
-      FID_COND_MRKT_DIV_CODE:  'J',   // KRX
-      FID_MRKT_CLS_CODE:       'K',   // 코스피
-      FID_SCTN_CLS_CODE:       '',    // 공백 입력 (문서 기준)
-      FID_INPUT_ISCD:          '',    // 공백 입력 (문서 기준)
-      FID_COND_MRKT_DIV_CODE1: '',    // 공백 입력 (문서 기준)
-      FID_INPUT_HOUR_1:        ''     // 공백 입력 (문서 기준)
-    };
-    const r = await kisGet(
-      '/uapi/domestic-stock/v1/quotations/comp-program-trade-today',
-      token, 'FHPPG04600101', params
-    );
-
-    // [RAW 저장]
-    saveRaw('program_FHPPG04600101', { params, response: r });
-
-    // [버그 수정] 응답 키: output → output1
-    if (!r?.output1?.length) {
-      log(`  ⚠️ 프로그램매매 output1 없음 (rt_cd:${r?.rt_cd}, msg:${r?.msg1})`);
-      throw new Error('output1 없음');
-    }
-
-    // 가장 최근 시간 데이터 (index 0 = 최근)
-    // 비어있지 않은 첫 번째 행 사용
-    const d = r.output1.find(row =>
-      parseInt(row.arbt_smtn_shnu_tr_pbmn||0) !== 0 ||
-      parseInt(row.nabt_smtn_shnu_tr_pbmn||0) !== 0
-    ) || r.output1[0];
-
-    log(`  ✅ 프로그램매매 성공 (시간: ${d.bsop_hour})`);
-    times.krProgram = getTimeStr();
-
-    // 응답 필드명 (API 문서 확인):
-    // 차익 매수: arbt_smtn_shnu_tr_pbmn
-    // 차익 매도: arbt_smtn_seln_tr_pbmn
-    // 비차익 매수: nabt_smtn_shnu_tr_pbmn
-    // 비차익 매도: nabt_smtn_seln_tr_pbmn
-    return {
-      buyArb:  d.arbt_smtn_shnu_tr_pbmn || '0',
-      sellArb: d.arbt_smtn_seln_tr_pbmn || '0',
-      buyNon:  d.nabt_smtn_shnu_tr_pbmn || '0',
-      sellNon: d.nabt_smtn_seln_tr_pbmn || '0'
-    };
-  } catch(e) {
-    log(`  ⚠️ 프로그램매매 실패 → 이전 유지: ${e.message}`);
-    return prev?.program || null;
-  }
-}
+// fetchProgram 제거됨: 프로그램매매는 단일종목 분석용으로 사이트 컨셉과 맞지 않아 제거
 
 // ── 마켓 뎁스 ─────────────────────────────────
 async function fetchDepth(token, prev, times) {
   log('📉 마켓 뎁스 수집 중 (KIS)...');
   try {
+    // TR: FHPUP02120000 (국내업종 일자별지수)
+    // output1(object): 오늘 기준 상승/보합/하락 종목 수
+    // 필드명: ascn_issu_cnt / stnr_issu_cnt / down_issu_cnt
     const params = {
       FID_COND_MRKT_DIV_CODE: 'U',
       FID_INPUT_ISCD:         '0001',
-      FID_INPUT_DATE_1:       getDate(-5),
-      FID_INPUT_DATE_2:       getDate(0),
+      FID_INPUT_DATE_1:       getDate(0),
       FID_PERIOD_DIV_CODE:    'D'
     };
     const r = await kisGet(
-      '/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice',
-      token, 'FHKUP03500100', params
+      '/uapi/domestic-stock/v1/quotations/inquire-index-daily-price',
+      token, 'FHPUP02120000', params
     );
 
-    // [RAW 저장]
-    saveRaw('depth_FHKUP03500100', { params, response: r });
+    saveRaw('depth_FHPUP02120000', { params, response: r });
 
-    if (!r?.output2?.length) {
-      log(`  ⚠️ 마켓뎁스 output2 없음 (rt_cd:${r?.rt_cd})`);
-      throw new Error('output2 없음');
+    if (!r?.output1 || r.rt_cd !== '0') {
+      log(`  ⚠️ 마켓뎁스 output1 없음 (rt_cd:${r?.rt_cd}, msg:${r?.msg1})`);
+      throw new Error('output1 없음');
     }
 
-    // [버그 수정]
-    // 이전: [...r.output2].reverse()[r.output2.length-1]
-    //       → reverse() 후 마지막 인덱스 접근 = 원본 첫 번째 요소 (가장 과거 날짜)
-    // 수정: slice(-1)[0] → 배열 마지막 요소 (가장 최근 날짜)
-    const sorted = [...r.output2].sort((a, b) =>
-      (b.stck_bsop_date||'').localeCompare(a.stck_bsop_date||'')
-    );
-    const last = sorted[0]; // 가장 최근 날짜
+    const o   = r.output1;
+    const up  = parseInt(o.ascn_issu_cnt || 0);
+    const neu = parseInt(o.stnr_issu_cnt || 0);
+    const dn  = parseInt(o.down_issu_cnt || 0);
 
-    log(`  ✅ 마켓뎁스 성공 (날짜: ${last.stck_bsop_date}, 상승:${last.fsts_nmix_prpr_updt_stck_cnt} 보합:${last.fsts_nmix_prpr_same_stck_cnt} 하락:${last.fsts_nmix_prpr_down_stck_cnt})`);
+    log(`  ✅ 마켓뎁스 성공 (상승:${up} 보합:${neu} 하락:${dn})`);
     times.krDepth = getTimeStr();
 
-    return {
-      up:  parseInt(last.fsts_nmix_prpr_updt_stck_cnt || 0),
-      neu: parseInt(last.fsts_nmix_prpr_same_stck_cnt || 0),
-      dn:  parseInt(last.fsts_nmix_prpr_down_stck_cnt || 0)
-    };
+    return { up, neu, dn };
   } catch(e) {
     log(`  ⚠️ 마켓뎁스 실패 → 이전 유지: ${e.message}`);
     return prev?.depth || null;
@@ -686,7 +623,6 @@ async function collect() {
   let supply, program, depth, sectors, stocks;
   if (token) {
     supply   = await fetchSupply(token, prev, updateTimes);   await sleep(1000);
-    program  = await fetchProgram(token, prev, updateTimes);  await sleep(1000);
     depth    = await fetchDepth(token, prev, updateTimes);    await sleep(1000);
     sectors  = await fetchKrSectors(token, prev, updateTimes); await sleep(1000);
     stocks   = await fetchKrStocks(token, prev, updateTimes);
@@ -711,7 +647,6 @@ async function collect() {
     kosdaq:  krIndex.kosdaq,
 
     supply:  supply  || prev.supply,
-    program: program || prev.program,
     depth:   depth   || prev.depth,
     sectors: sectors || prev.sectors,
     stocks:  stocks  || prev.stocks,
