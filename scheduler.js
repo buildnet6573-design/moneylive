@@ -1,29 +1,21 @@
 /**
- * MONEYLIVE 스케줄러 v5.7 (RAW 로그 저장 + 버그 수정)
- * 
- * [v5.6 → v5.7 변경사항]
- * 
- * ① RAW 데이터 저장
- *    - 모든 KIS API 응답을 storage/raw/YYYY-MM-DD/ 폴더에 원본 그대로 저장
- *    - 파일명: HH-MM-SS_{TR_ID}.json
- *    - 수급, 프로그램매매, 마켓뎁스 각각 별도 파일로 저장
- *    → 어떤 값이 실제로 내려오는지 직접 눈으로 확인 가능
- * 
- * ② fetchSupply 수정
- *    - [버그] 1차 API 파라미터 오류: fid_input_iscd → FID_INPUT_ISCD (대소문자)
- *    - [버그] fid_input_iscd_2 파라미터 누락 → "0001" 추가
- *    - [버그] 시세성 API가 0 반환 시 일별 API 폴백을 엉뚱한 TR(FHKST01010900)로 호출
- *             → 올바른 일별 TR: FHPTJ04040000 / URL: inquire-investor-daily-by-market
- *    - 일별 API 파라미터 수정 (문서 기준)
- * 
- * ③ fetchProgram 수정
- *    - [버그] 구버전 TR_ID FHPPG04600001 사용 → 신버전 FHPPG04600101 로 변경
- *    - [버그] URL comp-program-trade-daily → comp-program-trade-today 로 변경
- *    - [버그] 응답키 output → output1 로 변경 (API 문서 기준)
- *    - [버그] 응답 필드명 오류: arbt_buy_amt/nabt_buy_amt → 실제 필드명으로 수정
- * 
- * ④ fetchDepth 수정
- *    - [...r.output2].reverse()[r.output2.length-1] → 로직 오류, slice(-1)[0] 로 수정
+ * MONEYLIVE 스케줄러 v5.8 (휴장일 처리 + 수급 날짜 버그 수정)
+ *
+ * [v5.7 → v5.8 변경사항]
+ *
+ * ① 휴장일 완전 스킵 (isMarketClosed)
+ *    - 주말(토/일) + 한국 법정공휴일이면 scheduleAt 내부에서 job 자체를 실행 안 함
+ *    - 토큰 발급 포함 모든 수집 차단
+ *    - 서버 시작 시 즉시 수집(setTimeout)도 휴장일이면 스킵
+ *
+ * ② fetchSupply — 전 영업일 날짜 fallback 수정
+ *    - 장중 API가 0이고 현재 시각이 09:00 이전이면
+ *      일별 API 날짜를 당일이 아닌 마지막 영업일로 조회
+ *    - 09:00 이후에도 당일 데이터가 없으면 전 영업일로 fallback
+ *
+ * ③ buildSupplyResult — 휴장일 history 오염 방지
+ *    - 외국인+기관+개인 합산이 0이면 history에 추가하지 않음
+ *    - 공휴일/주말 날짜가 프론트 미니차트에 끼어드는 현상 제거
  */
 
 const fs    = require('fs');
@@ -36,7 +28,7 @@ const https = require('https');
 const STORAGE_DIR = path.join(__dirname, 'storage');
 const DATA_DIR    = path.join(STORAGE_DIR, 'data');
 const LOG_DIR     = path.join(STORAGE_DIR, 'logs');
-const RAW_DIR     = path.join(STORAGE_DIR, 'raw');   // ← NEW: RAW 원본 저장
+const RAW_DIR     = path.join(STORAGE_DIR, 'raw');
 const DATA_FILE   = path.join(__dirname, 'data.json');
 const TOKEN_FILE  = path.join(__dirname, 'token.json');
 
@@ -46,6 +38,46 @@ const TOKEN_FILE  = path.join(__dirname, 'token.json');
 
 const APP_KEY    = process.env.KIS_APP_KEY;
 const APP_SECRET = process.env.KIS_APP_SECRET;
+
+// ─────────────────────────────────────────────
+// [v5.8 NEW] 한국 법정공휴일 + 휴장일 판단
+// ─────────────────────────────────────────────
+// YYYYMMDD 형식. 매년 연말에 다음 해 날짜를 추가하세요.
+const KR_HOLIDAYS = new Set([
+  // 2025년
+  '20250101','20250128','20250129','20250130',
+  '20250301','20250505','20250506','20250606',
+  '20250815','20251003','20251005','20251006',
+  '20251007','20251009','20251225',
+  // 2026년
+  '20260101','20260216','20260217','20260218',
+  '20260301','20260505','20260525','20260606',
+  '20260815','20260924','20260925','20260926',
+  '20261009','20261225',
+  // 2027년
+  '20270101','20270205','20270206','20270207',
+  '20270301','20270505','20270513','20270606',
+  '20270816','20271015','20271016','20271017',
+  '20271011','20271225',
+]);
+
+function isMarketClosed(d) {
+  const dow = d.getDay(); // 0=일, 6=토
+  if (dow === 0 || dow === 6) return true;
+  const ymd = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  return KR_HOLIDAYS.has(ymd);
+}
+
+// 기준 날짜에서 N 영업일 전 날짜를 YYYYMMDD 형식으로 반환
+function getPrevTradingDate(offset = 1) {
+  const d = kstNow();
+  let count = 0;
+  while (count < offset) {
+    d.setDate(d.getDate() - 1);
+    if (!isMarketClosed(d)) count++;
+  }
+  return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+}
 
 // ─────────────────────────────────────────────
 // 유틸
@@ -96,20 +128,16 @@ function saveData(data) {
 }
 
 // ─────────────────────────────────────────────
-// [NEW] RAW 데이터 저장 함수
-// 모든 KIS API 응답을 원본 그대로 파일로 저장
-// storage/raw/YYYY-MM-DD/HH-MM-SS_{label}.json
+// RAW 데이터 저장 함수
 // ─────────────────────────────────────────────
 function saveRaw(label, data) {
   try {
     const today = getDateStr(0);
     const dir   = path.join(RAW_DIR, today);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
     const n   = kstNow();
     const hms = `${pad(n.getHours())}-${pad(n.getMinutes())}-${pad(n.getSeconds())}`;
     const file = path.join(dir, `${hms}_${label}.json`);
-
     fs.writeFileSync(file, JSON.stringify(data, null, 2));
     log(`  💾 RAW 저장: storage/raw/${today}/${hms}_${label}.json`);
   } catch (e) {
@@ -199,7 +227,7 @@ function fetchYahoo(symbol) {
   return new Promise((resolve) => {
     https.get({
       hostname: 'query1.finance.yahoo.com',
-      path: `/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=7d`,
+      path: `/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=14d`,
       headers: { 'User-Agent': 'Mozilla/5.0' }
     }, (res) => {
       let data = '';
@@ -214,8 +242,16 @@ function fetchYahoo(symbol) {
           const pairs      = timestamps.map((ts,i) => ({ts, c:closes[i]})).filter(p => p.c!=null && !isNaN(p.c));
           if (!pairs.length) return resolve(null);
 
-          const last   = pairs[pairs.length-1];
-          const prev   = pairs.length > 1 ? pairs[pairs.length-2] : null;
+          // [v5.8] 주말/공휴일 필터링: 거래일 데이터만 남김
+          const tradingPairs = pairs.filter(p => {
+            const d = new Date(p.ts * 1000);
+            const kst = new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+            return !isMarketClosed(kst);
+          });
+          if (!tradingPairs.length) return resolve(null);
+
+          const last   = tradingPairs[tradingPairs.length - 1];
+          const prev   = tradingPairs.length > 1 ? tradingPairs[tradingPairs.length - 2] : null;
           const change = prev ? ((last.c - prev.c) / prev.c * 100) : 0;
           const toKst  = (ts) => {
             const d   = new Date(ts*1000);
@@ -227,10 +263,10 @@ function fetchYahoo(symbol) {
             value:   last.c.toFixed(2),
             change:  parseFloat(change.toFixed(2)),
             rate:    parseFloat(change.toFixed(2)),
-            history: pairs.map((p,i) => ({
+            history: tradingPairs.map((p,i) => ({
               date:  toKst(p.ts),
               close: p.c,
-              change: i > 0 ? parseFloat(((p.c-pairs[i-1].c)/pairs[i-1].c*100).toFixed(2)) : 0
+              change: i > 0 ? parseFloat(((p.c-tradingPairs[i-1].c)/tradingPairs[i-1].c*100).toFixed(2)) : 0
             }))
           });
         } catch { resolve(null); }
@@ -309,23 +345,18 @@ async function fetchUsData(prev, times) {
 async function fetchSupply(token, prev, times) {
   log('💰 수급 동향 수집 중 (KIS)...');
   try {
-    // ─── 1차: 장중 시세성 API (FHPTJ04030000)
-    // 파라미터명 대소문자 수정: FID_INPUT_ISCD, FID_INPUT_ISCD_2 추가
+    // 1차: 장중 시세성 API
     const params1 = {
-      FID_INPUT_ISCD:   'KSP',   // 코스피
-      FID_INPUT_ISCD_2: '0001'   // 종합 (필수 파라미터 — 이전 버전 누락)
+      FID_INPUT_ISCD:   'KSP',
+      FID_INPUT_ISCD_2: '0001'
     };
     let r = await kisGet(
       '/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market',
       token, 'FHPTJ04030000', params1
     );
-
-    // [RAW 저장] 1차 응답 원본
     saveRaw('supply_intraday_FHPTJ04030000', { params: params1, response: r });
 
-    // output 배열 첫 번째 항목 추출 (시세성은 output 배열)
     let o = Array.isArray(r?.output) ? r.output[0] : r?.output;
-
     const allZero = !o || (
       parseInt(o.frgn_ntby_tr_pbmn||0) === 0 &&
       parseInt(o.orgn_ntby_tr_pbmn||0) === 0 &&
@@ -335,25 +366,24 @@ async function fetchSupply(token, prev, times) {
     if (!r || r.rt_cd !== '0' || allZero) {
       log(`  ℹ️ 장중 시세성 API 값 없음 (rt_cd:${r?.rt_cd}, 전부0:${allZero}) → 일별 API 시도`);
 
-      // ─── 2차: 장 마감 후 일별 확정 데이터 (FHPTJ04040000)
-      // [버그 수정] 이전 코드: 엉뚱한 URL + TR_ID 사용
-      // URL:  /uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-market
-      // 파라미터: 문서 기준 (FID_INPUT_DATE_1 == FID_INPUT_DATE_2: 당일 날짜)
-      const today  = getDate(0);
+      // [v5.8] 장 시작 전(09:00 이전)이면 전 영업일 날짜로 조회
+      const now = kstNow();
+      const isBeforeOpen = now.getHours() < 9;
+      const targetDate = isBeforeOpen ? getPrevTradingDate(1) : getDate(0);
+      log(`  ℹ️ 일별 API 조회 날짜: ${targetDate} (${isBeforeOpen ? '장 전 → 전 영업일' : '장 중/후 → 당일'})`);
+
       const params2 = {
         FID_COND_MRKT_DIV_CODE: 'U',
-        FID_INPUT_ISCD:         '0001',   // 코스피 종합
-        FID_INPUT_DATE_1:       today,
+        FID_INPUT_ISCD:         '0001',
+        FID_INPUT_DATE_1:       targetDate,
         FID_INPUT_ISCD_1:       'KSP',
-        FID_INPUT_DATE_2:       today,    // 당일 = 당일 (동일 날짜)
+        FID_INPUT_DATE_2:       targetDate,
         FID_INPUT_ISCD_2:       '0001'
       };
       r = await kisGet(
         '/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-market',
         token, 'FHPTJ04040000', params2
       );
-
-      // [RAW 저장] 2차 응답 원본
       saveRaw('supply_daily_FHPTJ04040000', { params: params2, response: r });
 
       if (!r || r.rt_cd !== '0' || !r.output?.length) {
@@ -361,29 +391,22 @@ async function fetchSupply(token, prev, times) {
         return prev?.supply || null;
       }
 
-      // output 배열 첫 번째 행 = 가장 최근 거래일
       o = r.output[0];
-      log(`  ✅ 일별 API 성공 (날짜: ${o.stck_bsop_date})`);
-
-      // 일별 API 단위: 백만원 → 억원 (÷100), 프론트 fmtVol()이 억 단위를 기대
       const ff = Math.round(parseInt(o.frgn_ntby_tr_pbmn || 0) / 100);
       const fo = Math.round(parseInt(o.orgn_ntby_tr_pbmn  || 0) / 100);
       const fi = Math.round(parseInt(o.prsn_ntby_tr_pbmn  || 0) / 100);
       log(`  ✅ 일별 API 성공 (날짜: ${o.stck_bsop_date}, 외국인: ${ff}억, 기관: ${fo}억, 개인: ${fi}억)`);
       times.krSupply = getTimeStr();
-      return buildSupplyResult({ foreign: ff, individual: fi, institution: fo }, prev);
+      return buildSupplyResult({ foreign: ff, individual: fi, institution: fo }, prev, o.stck_bsop_date);
     }
 
-    // ─── 1차 성공: 시세성 API (단위: 백만원 → 억원 변환, ÷100)
-    // 문서 확인: FHPTJ04030000 응답값은 백만원 단위
-    // 예시: frgn_ntby_tr_pbmn=148656 → 148,656백만원 → 1,487억원
-    // 프론트(index.html) fmtVol()은 억 단위 숫자를 기대하므로 ÷100
+    // 1차 성공: 장중 시세성 API
     const f    = Math.round(parseInt(o.frgn_ntby_tr_pbmn || 0) / 100);
     const ind  = Math.round(parseInt(o.prsn_ntby_tr_pbmn || 0) / 100);
     const inst = Math.round(parseInt(o.orgn_ntby_tr_pbmn || 0) / 100);
     log(`  ✅ 장중 시세성 API 성공 (외국인: ${f}억, 기관: ${inst}억, 개인: ${ind}억)`);
     times.krSupply = getTimeStr();
-    return buildSupplyResult({ foreign: f, individual: ind, institution: inst }, prev);
+    return buildSupplyResult({ foreign: f, individual: ind, institution: inst }, prev, null);
 
   } catch(e) {
     log(`  ⚠️ 수급 실패 → 이전 유지: ${e.message}`);
@@ -391,27 +414,37 @@ async function fetchSupply(token, prev, times) {
   }
 }
 
-function buildSupplyResult(newVals, prev) {
+// [v5.8] dataDate: 일별 API 사용 시 실제 거래일 날짜(YYYYMMDD), 없으면 오늘
+function buildSupplyResult(newVals, prev, dataDate) {
   const { foreign, individual, institution } = newVals;
-  const today       = getDateStr(0);
-  const total       = foreign + individual + institution;
+  const total = foreign + individual + institution;
+
+  // [v5.8] 합산이 0이면 휴장일 데이터 → history에 추가하지 않음
+  if (foreign === 0 && individual === 0 && institution === 0) {
+    log('  ℹ️ 수급 합산 0 → history 미추가 (휴장일 데이터)');
+    return { foreign, individual, institution, history: prev?.supply?.history || [] };
+  }
+
+  // 실제 데이터 날짜 결정: 일별 API 응답의 stck_bsop_date 우선, 없으면 오늘
+  let recordDate;
+  if (dataDate && dataDate.length === 8) {
+    // YYYYMMDD → YYYY-MM-DD
+    recordDate = `${dataDate.slice(0,4)}-${dataDate.slice(4,6)}-${dataDate.slice(6,8)}`;
+  } else {
+    recordDate = getDateStr(0);
+  }
+
   const prevHistory = prev?.supply?.history || [];
-  // 오늘 포함 5개 보관 → 프론트에서 slice(-5,-1) = 직전 4거래일, 오늘은 별도 칸
-  const history     = [...prevHistory.filter(h => h.date !== today), { date: today, total }]
+  const history = [...prevHistory.filter(h => h.date !== recordDate), { date: recordDate, total }]
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(-5);
   return { foreign, individual, institution, history };
 }
 
-// fetchProgram 제거됨: 단일종목 분석용으로 사이트 컨셉과 맞지 않아 제거
-
 // ── 마켓 뎁스 ─────────────────────────────────
 async function fetchDepth(token, prev, times) {
   log('📉 마켓 뎁스 수집 중 (KIS)...');
   try {
-    // TR: FHPUP02120000 (국내업종 일자별지수)
-    // output1(object): 오늘 기준 상승/보합/하락 종목 수
-    // 필드명: ascn_issu_cnt / stnr_issu_cnt / down_issu_cnt
     const params = {
       FID_COND_MRKT_DIV_CODE: 'U',
       FID_INPUT_ISCD:         '0001',
@@ -422,7 +455,6 @@ async function fetchDepth(token, prev, times) {
       '/uapi/domestic-stock/v1/quotations/inquire-index-daily-price',
       token, 'FHPUP02120000', params
     );
-
     saveRaw('depth_FHPUP02120000', { params, response: r });
 
     if (!r?.output1 || r.rt_cd !== '0') {
@@ -437,7 +469,6 @@ async function fetchDepth(token, prev, times) {
 
     log(`  ✅ 마켓뎁스 성공 (상승:${up} 보합:${neu} 하락:${dn})`);
     times.krDepth = getTimeStr();
-
     return { up, neu, dn };
   } catch(e) {
     log(`  ⚠️ 마켓뎁스 실패 → 이전 유지: ${e.message}`);
@@ -491,9 +522,6 @@ async function fetchKrSectors(token, prev, times) {
   if (isUpdated) times.krSector = getTimeStr();
   if (results.length > 0) {
     results.sort((a, b) => b.chg - a.chg);
-    
-    // 전부 0.00%이면 → 장 전/후 미수집 상태
-    // 이전에 유효한 데이터(0이 아닌 값)가 있으면 이전 데이터 유지
     const allZero = results.every(r => r.chg === 0);
     if (allZero && prev?.sectors?.length) {
       const prevAllZero = prev.sectors.every(r => r.chg === 0);
@@ -625,7 +653,7 @@ async function collect() {
   const crypto  = await fetchCrypto(prev.crypto, updateTimes); await sleep(1000);
 
   // 2. KIS
-  let supply, program, depth, sectors, stocks;
+  let supply, depth, sectors, stocks;
   if (token) {
     supply   = await fetchSupply(token, prev, updateTimes);   await sleep(1000);
     depth    = await fetchDepth(token, prev, updateTimes);    await sleep(1000);
@@ -706,7 +734,6 @@ async function collect() {
 
   saveData(finalData);
 
-  // 수급 데이터 별도 저장 (기존 기능 유지)
   if (supply) {
     fs.writeFileSync(path.join(DATA_DIR, 'supply.json'), JSON.stringify(supply, null, 2));
   }
@@ -724,15 +751,22 @@ function scheduleAt(hour, minute, job) {
     const today = now.getFullYear()*10000 + now.getMonth()*100 + now.getDate();
     if (now.getHours()===hour && now.getMinutes()===minute && lastRunDay!==today) {
       lastRunDay = today;
+      // [v5.8] 휴장일이면 job 실행 안 함
+      if (isMarketClosed(now)) {
+        log(`🗓️ 휴장일 (${today}) — 수집 스킵`);
+        flushLog();
+        return;
+      }
       job();
     }
   }, 30000);
   log(`🕐 스케줄 등록: KST ${pad(hour)}:${pad(minute)}`);
 }
 
-log('🚀 MONEYLIVE 스케줄러 v5.7 시작');
+log('🚀 MONEYLIVE 스케줄러 v5.8 시작');
 log('📁 저장경로: storage/data/ + storage/logs/ + storage/raw/');
 log('스케줄: 15:00 토큰 / 15:35 / 18:05 / 06:05 / 07:55');
+log('🗓️ 주말 + 법정공휴일 자동 스킵');
 
 scheduleAt(15,  0, async () => { log('[15:00] 토큰 발급'); await getToken(); flushLog(); });
 scheduleAt(15, 35, () => { log('[15:35] 1차 수집'); collect(); });
@@ -740,5 +774,13 @@ scheduleAt(18,  5, () => { log('[18:05] 2차 수집'); collect(); });
 scheduleAt( 6,  5, () => { log('[06:05] 3차 수집'); collect(); });
 scheduleAt( 7, 55, () => { log('[07:55] 4차 수집 (최종)'); collect(); });
 
+// 서버 시작 시 즉시 수집 (휴장일이면 스킵)
 log('📂 시작 시 즉시 수집 (3초 후)');
-setTimeout(collect, 3000);
+setTimeout(() => {
+  if (isMarketClosed(kstNow())) {
+    log('🗓️ 서버 시작: 휴장일 — 즉시 수집 스킵');
+    flushLog();
+    return;
+  }
+  collect();
+}, 3000);
