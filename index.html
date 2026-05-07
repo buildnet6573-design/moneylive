@@ -482,6 +482,19 @@
     <div class="card" style="padding: 14px 16px;">
       <div class="update-item">
         <div class="update-header">
+          <span class="update-ver">v5.8</span>
+          <span class="update-date">2026.05.07 배포</span>
+        </div>
+        <ul class="update-desc">
+          <li><b>휴장일 수집 완전 차단</b>: 주말 + 법정공휴일에 토큰 발급 및 데이터 수집 전체 스킵</li>
+          <li><b>수급 날짜 버그 수정</b>: 장 시작 전(09:00 이전) 수집 시 전 영업일 확정 데이터 정확히 표시</li>
+          <li><b>지수 미니차트 개선</b>: 공휴일/주말 날짜 자동 필터링, 휴장일에는 "휴장" 표기</li>
+          <li><b>전일비 헤더</b>: 공휴일도 건너뛰고 실제 전 영업일 날짜 표시</li>
+        </ul>
+      </div>
+      <div class="update-divider"></div>
+      <div class="update-item">
+        <div class="update-header">
           <span class="update-ver">v5.7</span>
           <span class="update-date">2026.04.27 12:30 배포</span>
         </div>
@@ -562,12 +575,34 @@
 <script>
 const DAYS=['일','월','화','수','목','금','토'];
 
-// ── 전일비 날짜 헤더 동적 업데이트
+// [v5.8] 한국 법정공휴일 세트 (scheduler.js와 동기화)
+const KR_HOLIDAYS_SET = new Set([
+  '20250101','20250128','20250129','20250130',
+  '20250301','20250505','20250506','20250606',
+  '20250815','20251003','20251005','20251006',
+  '20251007','20251009','20251225',
+  '20260101','20260216','20260217','20260218',
+  '20260301','20260505','20260525','20260606',
+  '20260815','20260924','20260925','20260926',
+  '20261009','20261225',
+  '20270101','20270205','20270206','20270207',
+  '20270301','20270505','20270513','20270606',
+  '20270816','20271015','20271016','20271017',
+  '20271011','20271225',
+]);
+
+function isKrHoliday(d) {
+  if (d.getDay() === 0 || d.getDay() === 6) return true;
+  const ymd = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  return KR_HOLIDAYS_SET.has(ymd);
+}
+
+// ── 전일비 날짜 헤더 동적 업데이트 (공휴일 포함 스킵)
 function updateChgHeaders() {
   const kst = new Date(new Date().toLocaleString('en-US', {timeZone:'Asia/Seoul'}));
   let prev = new Date(kst);
   prev.setDate(prev.getDate() - 1);
-  while (prev.getDay() === 0 || prev.getDay() === 6) prev.setDate(prev.getDate() - 1);
+  while (isKrHoliday(prev)) prev.setDate(prev.getDate() - 1);
   const label = `전일비 (${prev.getMonth()+1}/${prev.getDate()})`;
   document.querySelectorAll('#th-chg, .th-chg-label').forEach(el => { el.textContent = label; });
 }
@@ -718,7 +753,12 @@ function setVal(id,value,change){
 
 function renderWeek(weekId,todDateId,todValId,todChgId,hist,todVal,todChg){
   const cols=document.getElementById(weekId).querySelectorAll('.week-day');
-  hist.forEach((item,i)=>{
+  // [v5.8] 주말/공휴일 제거된 거래일 데이터만 표시
+  const tradingHist = hist.filter(item => {
+    const d = parseDateLocal(item.date);
+    return d && !isKrHoliday(d);
+  });
+  tradingHist.forEach((item,i)=>{
     const col=cols[i]; if(!col)return;
     const isUp=parseFloat(item.change||item.chg||0)>=0;
     col.querySelector('.week-day-date').textContent=fmtDate(item.date);
@@ -729,9 +769,15 @@ function renderWeek(weekId,todDateId,todValId,todChgId,hist,todVal,todChg){
   });
   const now=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
   document.getElementById(todDateId).textContent=`${now.getMonth()+1}/${now.getDate()} ${DAYS[now.getDay()]}`;
-  const tv=document.getElementById(todValId);tv.textContent=parseFloat(todVal).toLocaleString('ko',{maximumFractionDigits:1});tv.classList.remove('loading');
-  const tc=document.getElementById(todChgId);const isUp=parseFloat(todChg)>=0;
-  tc.textContent=(isUp?'▲ +':'▼ ')+Math.abs(parseFloat(todChg)).toFixed(2)+'%';tc.className='week-today-chg '+(isUp?'up':'down');
+  // [v5.8] 오늘이 휴장일이면 "휴장" 표시
+  if(isKrHoliday(now)){
+    const tv=document.getElementById(todValId);tv.textContent='휴장';tv.classList.remove('loading');tv.style.color='var(--text2)';
+    const tc=document.getElementById(todChgId);tc.textContent='';tc.className='week-today-chg neutral';
+  } else {
+    const tv=document.getElementById(todValId);tv.textContent=parseFloat(todVal).toLocaleString('ko',{maximumFractionDigits:1});tv.classList.remove('loading');tv.style.color='';
+    const tc=document.getElementById(todChgId);const isUp=parseFloat(todChg)>=0;
+    tc.textContent=(isUp?'▲ +':'▼ ')+Math.abs(parseFloat(todChg)).toFixed(2)+'%';tc.className='week-today-chg '+(isUp?'up':'down');
+  }
 }
 
 function setSupplyVal(id,val){
